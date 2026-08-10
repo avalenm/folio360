@@ -46,6 +46,44 @@ function openCreate(): void {
   dialogVisible.value = true
 }
 
+// Antes esto era copiar/pegar el XML a mano — un error real llevó a un CAF
+// con la llave RSA truncada (512 bits en vez de los 2048 que exige el SII,
+// cortada al seleccionar el texto), que el SII rechazó en el upload real sin
+// dar mayor detalle ("HA OCURRIDO UN ERROR EN EL UPLOAD..."). Leer el
+// archivo directo evita el copy/paste por completo, y de paso se completan
+// los campos del formulario parseando el propio XML — un solo lugar de
+// verdad, no dos copias que puedan desincronizarse.
+async function handleFileUpload(event: Event): Promise<void> {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+
+  const text = await file.text()
+  draft.xmlRaw = text
+
+  try {
+    const doc = new DOMParser().parseFromString(text, 'text/xml')
+    if (doc.querySelector('parsererror')) throw new Error('XML inválido')
+
+    const td = doc.querySelector('TD')?.textContent
+    const folioD = doc.querySelector('RNG > D')?.textContent
+    const folioH = doc.querySelector('RNG > H')?.textContent
+    const fa = doc.querySelector('FA')?.textContent
+
+    if (td) draft.tipoDte = Number(td)
+    if (folioD) draft.folioDesde = Number(folioD)
+    if (folioH) draft.folioHasta = Number(folioH)
+    if (fa) draft.fechaAutorizacion = new Date(fa)
+  } catch {
+    toast.add({
+      severity: 'warn',
+      summary: 'No se pudo leer el XML automáticamente',
+      detail: 'Completa los campos manualmente, el archivo igual se adjuntó',
+      life: 4000
+    })
+  }
+}
+
 async function handleSave(): Promise<void> {
   saving.value = true
   try {
@@ -149,7 +187,11 @@ onMounted(fetchAll)
           <DatePicker v-model="draft.fechaAutorizacion" date-format="dd/mm/yy" />
         </label>
         <label class="field">
-          <span>XML del CAF</span>
+          <span>Archivo XML del CAF</span>
+          <input type="file" accept=".xml,text/xml" @change="handleFileUpload" />
+        </label>
+        <label class="field">
+          <span>XML del CAF (se completa solo al elegir el archivo)</span>
           <Textarea v-model="draft.xmlRaw" rows="4" required />
         </label>
 
