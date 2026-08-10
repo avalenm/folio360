@@ -1,8 +1,12 @@
-import { createRouter, createWebHistory } from 'vue-router'
+import { createRouter, createWebHashHistory } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 
+// Hash history (no server rewrite support needed) — GitHub Pages es hosting
+// estático puro, un refresh o link directo a una ruta con historial normal
+// (p.ej. /documents) daría 404 porque no hay servidor que redirija todo a
+// index.html.
 const router = createRouter({
-  history: createWebHistory(),
+  history: createWebHashHistory(),
   routes: [
     {
       path: '/login',
