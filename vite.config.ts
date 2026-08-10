@@ -2,10 +2,10 @@ import { fileURLToPath, URL } from 'node:url'
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 
-// base '/folio360/' porque se publica como GitHub Pages de proyecto
-// (avalenm.github.io/folio360/), no como Pages de usuario/org.
+// base '/' porque se sirve desde el dominio propio folio360.cl (raíz), no
+// desde la subruta avalenm.github.io/folio360/.
 export default defineConfig({
-  base: '/folio360/',
+  base: '/',
   plugins: [vue()],
   resolve: {
     alias: {
