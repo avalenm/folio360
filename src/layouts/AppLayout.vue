@@ -33,7 +33,8 @@ const navGroups: { label: string | null; items: NavItem[] }[] = [
     items: [
       { to: '/documents', label: 'Documentos', icon: 'pi-file' },
       { to: '/customers', label: 'Clientes', icon: 'pi-users' },
-      { to: '/products', label: 'Productos', icon: 'pi-box' }
+      { to: '/products', label: 'Productos', icon: 'pi-box' },
+      { to: '/libros', label: 'Libros C-V', icon: 'pi-book', minRole: 'contador' }
     ]
   },
   {

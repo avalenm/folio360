@@ -194,6 +194,20 @@ export interface Supplier {
   updatedAt: string
 }
 
+// Una fila del ResumenPeriodo del Libro de Compra-Venta (ver
+// server/src/sii/libro-cv.ts) — un tipo de documento SII (33, 61, etc.) con
+// sus totales agregados del período.
+export interface LibroResumenTipo {
+  tipoDoc: number
+  totDoc: number
+  totMntExe: number
+  totMntNeto: number
+  totMntIVA: number
+  totMntTotal: number
+  totIVAUsoComun?: number
+  totIVARetTotal?: number
+}
+
 export type PurchaseTipoDocumento = 'factura' | 'boleta' | 'nota_credito' | 'nota_debito'
 
 export type PurchaseAccionSii = 'ERM' | 'ACD' | 'RCD' | 'RFP' | 'RFT'
