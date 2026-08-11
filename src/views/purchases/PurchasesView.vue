@@ -27,14 +27,16 @@ const tiposDocumento: { label: string; value: PurchaseTipoDocumento }[] = [
   { label: 'Factura', value: 'factura' },
   { label: 'Boleta', value: 'boleta' },
   { label: 'Nota de crédito', value: 'nota_credito' },
-  { label: 'Nota de débito', value: 'nota_debito' }
+  { label: 'Nota de débito', value: 'nota_debito' },
+  { label: 'Factura de compra', value: 'factura_compra' }
 ]
 
 const tipoDocumentoLabel: Record<PurchaseTipoDocumento, string> = {
   factura: 'Factura',
   boleta: 'Boleta',
   nota_credito: 'Nota de crédito',
-  nota_debito: 'Nota de débito'
+  nota_debito: 'Nota de débito',
+  factura_compra: 'Factura de compra'
 }
 
 const accionesSii: { label: string; value: PurchaseAccionSii }[] = [

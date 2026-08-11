@@ -208,7 +208,7 @@ export interface LibroResumenTipo {
   totIVARetTotal?: number
 }
 
-export type PurchaseTipoDocumento = 'factura' | 'boleta' | 'nota_credito' | 'nota_debito'
+export type PurchaseTipoDocumento = 'factura' | 'boleta' | 'nota_credito' | 'nota_debito' | 'factura_compra'
 
 export type PurchaseAccionSii = 'ERM' | 'ACD' | 'RCD' | 'RFP' | 'RFT'
 
