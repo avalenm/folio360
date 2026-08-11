@@ -57,12 +57,12 @@ const visibleItems = computed(() =>
 // ambiente porque un folio de certificación jamás puede usarse en producción
 // (ver caf.model.ts) — mezclarlos en un solo total sería engañoso.
 const balanceFolios = computed(() => {
-  const porGrupo = new Map<string, { tipoDte: number; ambiente: Caf['ambiente']; disponibles: number }>()
+  const porGrupo = new Map<string, { key: string; tipoDte: number; ambiente: Caf['ambiente']; disponibles: number }>()
 
   for (const caf of items.value) {
     if (caf.estado !== 'activo') continue
     const key = `${caf.tipoDte}-${caf.ambiente}`
-    const grupo = porGrupo.get(key) ?? { tipoDte: caf.tipoDte, ambiente: caf.ambiente, disponibles: 0 }
+    const grupo = porGrupo.get(key) ?? { key, tipoDte: caf.tipoDte, ambiente: caf.ambiente, disponibles: 0 }
     grupo.disponibles += folioDisponibles(caf)
     porGrupo.set(key, grupo)
   }
@@ -188,16 +188,26 @@ onMounted(fetchAll)
       <Button label="Cargar CAF" icon="pi pi-plus" @click="openCreate" />
     </div>
 
-    <div class="balance-grid">
-      <article v-for="grupo in balanceFolios" :key="`${grupo.tipoDte}-${grupo.ambiente}`" class="balance-card surface-card">
-        <div class="balance-top">
-          <span class="balance-nombre">{{ nombreTipoDte(grupo.tipoDte) }} ({{ grupo.tipoDte }})</span>
-          <Tag :severity="grupo.ambiente === 'produccion' ? 'danger' : 'info'" :value="grupo.ambiente" />
-        </div>
-        <span class="balance-valor">{{ grupo.disponibles.toLocaleString('es-CL') }}</span>
-        <span class="balance-label">folios disponibles</span>
-      </article>
-      <p v-if="!balanceFolios.length && !loading" class="balance-empty">Sin CAF activos cargados.</p>
+    <div class="surface-card balance-card">
+      <div class="balance-header">
+        <strong>Balance de folios disponibles</strong>
+        <span class="muted">Por tipo de documento y ambiente, según los CAF activos</span>
+      </div>
+
+      <DataTable :value="balanceFolios" data-key="key" size="small">
+        <Column header="Tipo DTE">
+          <template #body="{ data }">{{ nombreTipoDte(data.tipoDte) }} ({{ data.tipoDte }})</template>
+        </Column>
+        <Column header="Ambiente">
+          <template #body="{ data }">
+            <Tag :severity="data.ambiente === 'produccion' ? 'danger' : 'info'" :value="data.ambiente" />
+          </template>
+        </Column>
+        <Column header="Folios disponibles">
+          <template #body="{ data }">{{ (data.disponibles as number).toLocaleString('es-CL') }}</template>
+        </Column>
+        <template #empty>Sin CAF activos cargados.</template>
+      </DataTable>
     </div>
 
     <div class="table-toolbar">
@@ -288,47 +298,25 @@ onMounted(fetchAll)
   font-size: 1.4rem;
 }
 
-.balance-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 0.9rem;
+.balance-card {
+  padding: 1.25rem;
   margin-bottom: 1.25rem;
 }
 
-.balance-card {
-  padding: 1rem 1.1rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
+.balance-header {
+  margin-bottom: 1rem;
 }
 
-.balance-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
+.balance-header strong {
+  display: block;
 }
 
-.balance-nombre {
-  font-size: 0.82rem;
-  font-weight: 600;
-  color: #334155;
-}
-
-.balance-valor {
-  font-size: 1.6rem;
-  font-weight: 700;
-  line-height: 1.1;
-}
-
-.balance-label {
-  font-size: 0.78rem;
+.muted {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 400;
   color: #64748b;
-}
-
-.balance-empty {
-  color: #64748b;
-  font-size: 0.9rem;
+  margin-top: 0.15rem;
 }
 
 .table-toolbar {
