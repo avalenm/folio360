@@ -5,7 +5,7 @@ import { useConfirm } from 'primevue/useconfirm'
 import { useToast } from 'primevue/usetoast'
 import { feathersClient } from '@/services/feathers'
 import { useAuthStore } from '@/stores/auth'
-import type { DteDocument, Paginated, Purchase, Supplier } from '@/types'
+import type { DteDocument, IncomingInvoice, Paginated, Purchase, Supplier } from '@/types'
 
 const auth = useAuthStore()
 const confirm = useConfirm()
@@ -13,7 +13,15 @@ const toast = useToast()
 const documents = ref<DteDocument[]>([])
 const purchases = ref<Purchase[]>([])
 const suppliers = ref<Supplier[]>([])
+const incomingInvoices = ref<IncomingInvoice[]>([])
 const loading = ref(true)
+
+const tipoDteLabel: Record<number, string> = {
+  33: 'Factura',
+  34: 'Factura exenta',
+  56: 'Nota de débito',
+  61: 'Nota de crédito'
+}
 
 const ESTADOS_EMITIDOS = ['pendiente_firma', 'firmado', 'enviado', 'aceptado', 'reparo']
 const ESTADOS_ANULADOS = ['draft', 'rechazado', 'anulado']
@@ -158,15 +166,16 @@ async function refreshPurchases(): Promise<void> {
 
 onMounted(async () => {
   try {
-    // `purchases` es contador+ en el servidor (ver hooks/require-role.ts) —
-    // pedirlo igual para un vendedor haría fallar todo el Promise.all
-    // (incluyendo documents/suppliers) por una sola llamada rechazada. Se
-    // omite directamente: el panel de compras y la tarjeta "Por pagar"
-    // simplemente no aplican a ese rol.
+    // `purchases`/`incoming-invoices` son contador+ en el servidor (ver
+    // hooks/require-role.ts) — pedirlos igual para un vendedor haría fallar
+    // todo el Promise.all (incluyendo documents/suppliers) por una sola
+    // llamada rechazada. Se omiten directamente: esas secciones simplemente
+    // no aplican a ese rol.
     const requests: [
       Promise<Paginated<DteDocument> | DteDocument[]>,
       Promise<Paginated<Purchase> | Purchase[]>,
-      Promise<Paginated<Supplier> | Supplier[]>
+      Promise<Paginated<Supplier> | Supplier[]>,
+      Promise<Paginated<IncomingInvoice> | IncomingInvoice[]>
     ] = [
       feathersClient.service('documents').find({ query: { $limit: 200, $sort: { createdAt: -1 } } }) as Promise<
         Paginated<DteDocument> | DteDocument[]
@@ -176,12 +185,18 @@ onMounted(async () => {
             Paginated<Purchase> | Purchase[]
           >)
         : Promise.resolve([]),
-      feathersClient.service('suppliers').find({ query: { $limit: 200 } }) as Promise<Paginated<Supplier> | Supplier[]>
+      feathersClient.service('suppliers').find({ query: { $limit: 200 } }) as Promise<Paginated<Supplier> | Supplier[]>,
+      auth.hasMinRole('contador')
+        ? (feathersClient.service('incoming-invoices').find({ query: { $limit: 200 } }) as Promise<
+            Paginated<IncomingInvoice> | IncomingInvoice[]
+          >)
+        : Promise.resolve([])
     ]
-    const [documentsResult, purchasesResult, suppliersResult] = await Promise.all(requests)
+    const [documentsResult, purchasesResult, suppliersResult, incomingResult] = await Promise.all(requests)
     documents.value = Array.isArray(documentsResult) ? documentsResult : documentsResult.data
     purchases.value = Array.isArray(purchasesResult) ? purchasesResult : purchasesResult.data
     suppliers.value = Array.isArray(suppliersResult) ? suppliersResult : suppliersResult.data
+    incomingInvoices.value = Array.isArray(incomingResult) ? incomingResult : incomingResult.data
   } finally {
     loading.value = false
   }
@@ -204,9 +219,17 @@ function upsertPurchase(purchase: Purchase): void {
 function dropPurchase(purchase: Purchase): void {
   purchases.value = purchases.value.filter((p) => p._id !== purchase._id)
 }
+function addIncoming(invoice: IncomingInvoice): void {
+  if (incomingInvoices.value.some((i) => i._id === invoice._id)) return
+  incomingInvoices.value = [invoice, ...incomingInvoices.value]
+}
+function dropIncoming(invoice: IncomingInvoice): void {
+  incomingInvoices.value = incomingInvoices.value.filter((i) => i._id !== invoice._id)
+}
 
 const documentsService = feathersClient.service('documents')
 const purchasesService = feathersClient.service('purchases')
+const incomingInvoicesService = feathersClient.service('incoming-invoices')
 
 documentsService.on('created', upsertDocument)
 documentsService.on('patched', upsertDocument)
@@ -215,6 +238,8 @@ purchasesService.on('created', upsertPurchase)
 purchasesService.on('patched', upsertPurchase)
 purchasesService.on('updated', upsertPurchase)
 purchasesService.on('removed', dropPurchase)
+incomingInvoicesService.on('created', addIncoming)
+incomingInvoicesService.on('removed', dropIncoming)
 
 onUnmounted(() => {
   documentsService.removeListener('created', upsertDocument)
@@ -224,6 +249,8 @@ onUnmounted(() => {
   purchasesService.removeListener('patched', upsertPurchase)
   purchasesService.removeListener('updated', upsertPurchase)
   purchasesService.removeListener('removed', dropPurchase)
+  incomingInvoicesService.removeListener('created', addIncoming)
+  incomingInvoicesService.removeListener('removed', dropIncoming)
 })
 </script>
 
@@ -254,6 +281,34 @@ onUnmounted(() => {
         </footer>
       </article>
     </div>
+
+    <section v-if="auth.hasMinRole('contador')" class="recent surface-card">
+      <header class="recent-header">
+        <h2 class="section-title">
+          Facturas recibidas
+          <span v-if="incomingInvoices.length > 0" class="count-badge">{{ incomingInvoices.length }}</span>
+        </h2>
+        <router-link to="/facturas-recibidas" class="stat-link">Revisar <i class="pi pi-arrow-right" /></router-link>
+      </header>
+
+      <p v-if="!loading && incomingInvoices.length === 0" class="recent-empty">
+        No hay facturas nuevas detectadas en la Casilla de Intercambio.
+      </p>
+
+      <ul v-else class="recibida-list">
+        <li v-for="factura in incomingInvoices" :key="factura._id" class="recibida-item">
+          <span class="recibida-meta">
+            <span class="recibida-proveedor">{{ factura.emisorRazonSocial ?? factura.emisorRut }}</span>
+            <span class="recibida-sub">
+              {{ tipoDteLabel[factura.tipoDte] ?? `Tipo ${factura.tipoDte}` }} folio {{ factura.folio }} ·
+              {{ new Date(factura.fechaEmision).toLocaleDateString('es-CL') }}
+            </span>
+          </span>
+          <span class="recibida-monto">{{ formatCurrency(factura.montoTotal) }}</span>
+          <router-link :to="'/facturas-recibidas'"><Button label="Revisar" icon="pi pi-eye" size="small" text /></router-link>
+        </li>
+      </ul>
+    </section>
 
     <section class="recent surface-card">
       <header class="recent-header">
