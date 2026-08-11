@@ -232,7 +232,43 @@ export interface Purchase {
   montoExento: number
   montoTotal: number
   pagado: boolean
+  origen?: 'manual' | 'email'
   siiAcuse?: PurchaseSiiAcuse
+  createdAt: string
+  updatedAt: string
+}
+
+// Config de la Casilla de Intercambio de DTE (ver server/src/email/casilla-intercambio.ts)
+// — nunca trae el password, ese campo solo se manda al guardar, nunca vuelve.
+export interface MailboxConfig {
+  _id: string
+  email: string
+  imapHost: string
+  imapPort: number
+  imapSecure: boolean
+  imapUsuario: string
+  activo: boolean
+  ultimoPolling?: string
+  ultimoError?: string
+  createdAt: string
+  updatedAt: string
+}
+
+// Un DTE detectado en la Casilla de Intercambio, a la espera de revisión —
+// ver server/src/models/tenant/incoming-invoice.model.ts.
+export interface IncomingInvoice {
+  _id: string
+  messageId: string
+  emisorRut: string
+  emisorRazonSocial?: string
+  tipoDte: number
+  folio: number
+  fechaEmision: string
+  montoNeto: number
+  montoIva: number
+  montoExento: number
+  montoTotal: number
+  recibidoEn: string
   createdAt: string
   updatedAt: string
 }

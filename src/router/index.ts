@@ -48,6 +48,18 @@ const router = createRouter({
           meta: { minRole: 'contador' }
         },
         {
+          path: 'facturas-recibidas',
+          name: 'facturas-recibidas',
+          component: () => import('@/views/purchases/FacturasRecibidasView.vue'),
+          meta: { minRole: 'contador' }
+        },
+        {
+          path: 'casilla-intercambio',
+          name: 'casilla-intercambio',
+          component: () => import('@/views/settings/CasillaIntercambioView.vue'),
+          meta: { minRole: 'admin' }
+        },
+        {
           path: 'organizations',
           name: 'organizations',
           component: () => import('@/views/organizations/OrganizationsView.vue')

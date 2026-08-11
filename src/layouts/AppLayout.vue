@@ -41,6 +41,7 @@ const navGroups: { label: string | null; items: NavItem[] }[] = [
     label: 'Compras',
     items: [
       { to: '/purchases', label: 'Compras', icon: 'pi-shopping-cart', minRole: 'contador' },
+      { to: '/facturas-recibidas', label: 'Facturas recibidas', icon: 'pi-inbox', minRole: 'contador' },
       { to: '/suppliers', label: 'Proveedores', icon: 'pi-truck' }
     ]
   },
@@ -49,6 +50,7 @@ const navGroups: { label: string | null; items: NavItem[] }[] = [
     items: [
       { to: '/caf', label: 'CAF', icon: 'pi-key', minRole: 'admin' },
       { to: '/certificates', label: 'Certificados', icon: 'pi-shield', minRole: 'admin' },
+      { to: '/casilla-intercambio', label: 'Casilla de Intercambio', icon: 'pi-envelope', minRole: 'admin' },
       { to: '/members', label: 'Miembros', icon: 'pi-user-plus', minRole: 'admin' },
       { to: '/organizations', label: 'Organizaciones', icon: 'pi-building' },
       { to: '/users', label: 'Mi perfil', icon: 'pi-user' }
