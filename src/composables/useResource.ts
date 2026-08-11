@@ -1,4 +1,4 @@
-import { ref, shallowRef } from 'vue'
+import { onUnmounted, ref, shallowRef } from 'vue'
 import { feathersClient } from '@/services/feathers'
 import type { Paginated } from '@/types'
 
@@ -8,10 +8,41 @@ import type { Paginated } from '@/types'
 // shallowRef (no ref) porque siempre reemplazamos el array completo — evita
 // además un problema conocido de TS con Ref<T> cuando T es un genérico
 // acotado por una interfaz.
+//
+// También se suscribe a los eventos en vivo del servicio (created/patched/
+// updated/removed, ver server/src/channels.ts) — así una tabla se actualiza
+// sola cuando un proceso en segundo plano (worker de estado SII, poller de
+// la Casilla de Intercambio) cambia algo, no solo cuando el propio usuario
+// hace una acción. `onUnmounted` es seguro acá porque useResource() siempre
+// se llama de forma síncrona dentro del setup() de un componente (misma
+// regla que cualquier otro composable con lifecycle hooks).
 export function useResource<T extends { _id: string }>(serviceName: string) {
   const items = shallowRef<T[]>([])
   const loading = ref(false)
   const error = ref<string | null>(null)
+
+  const service = feathersClient.service(serviceName)
+
+  function upsert(item: T): void {
+    const exists = items.value.some((i) => i._id === item._id)
+    items.value = exists ? items.value.map((i) => (i._id === item._id ? item : i)) : [item, ...items.value]
+  }
+
+  function drop(item: T): void {
+    items.value = items.value.filter((i) => i._id !== item._id)
+  }
+
+  service.on('created', upsert)
+  service.on('patched', upsert)
+  service.on('updated', upsert)
+  service.on('removed', drop)
+
+  onUnmounted(() => {
+    service.removeListener('created', upsert)
+    service.removeListener('patched', upsert)
+    service.removeListener('updated', upsert)
+    service.removeListener('removed', drop)
+  })
 
   async function fetchAll(): Promise<void> {
     loading.value = true

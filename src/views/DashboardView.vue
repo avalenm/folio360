@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import Button from 'primevue/button'
 import { useConfirm } from 'primevue/useconfirm'
 import { useToast } from 'primevue/usetoast'
@@ -185,6 +185,45 @@ onMounted(async () => {
   } finally {
     loading.value = false
   }
+})
+
+// Panorama no usa useResource (junta 3 fuentes con lógica propia), así que
+// se suscribe a mano — mismo mecanismo que useResource.ts, ver la nota ahí
+// sobre por qué esto importa (estado SII y facturas recibidas cambian en
+// segundo plano, sin que el usuario haga nada).
+function upsertDocument(doc: DteDocument): void {
+  const exists = documents.value.some((d) => d._id === doc._id)
+  documents.value = exists ? documents.value.map((d) => (d._id === doc._id ? doc : d)) : [doc, ...documents.value]
+}
+function upsertPurchase(purchase: Purchase): void {
+  const exists = purchases.value.some((p) => p._id === purchase._id)
+  purchases.value = exists
+    ? purchases.value.map((p) => (p._id === purchase._id ? purchase : p))
+    : [purchase, ...purchases.value]
+}
+function dropPurchase(purchase: Purchase): void {
+  purchases.value = purchases.value.filter((p) => p._id !== purchase._id)
+}
+
+const documentsService = feathersClient.service('documents')
+const purchasesService = feathersClient.service('purchases')
+
+documentsService.on('created', upsertDocument)
+documentsService.on('patched', upsertDocument)
+documentsService.on('updated', upsertDocument)
+purchasesService.on('created', upsertPurchase)
+purchasesService.on('patched', upsertPurchase)
+purchasesService.on('updated', upsertPurchase)
+purchasesService.on('removed', dropPurchase)
+
+onUnmounted(() => {
+  documentsService.removeListener('created', upsertDocument)
+  documentsService.removeListener('patched', upsertDocument)
+  documentsService.removeListener('updated', upsertDocument)
+  purchasesService.removeListener('created', upsertPurchase)
+  purchasesService.removeListener('patched', upsertPurchase)
+  purchasesService.removeListener('updated', upsertPurchase)
+  purchasesService.removeListener('removed', dropPurchase)
 })
 </script>
 
