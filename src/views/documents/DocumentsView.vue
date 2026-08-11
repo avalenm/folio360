@@ -644,7 +644,62 @@ function confirmDelete(document: DteDocument): void {
 }
 
 const sending = ref(false)
+const sendingSet = ref(false)
 const checking = ref(false)
+
+// El "Set de Pruebas" formal de certificación del SII exige que todo el set
+// vaya en UN SOLO sobre EnvioDTE (ver send-document-set.service.ts) — a
+// diferencia del envío normal día a día (un documento por sobre). Esto es
+// solo para ese caso: el envío normal sigue siendo "Enviar al SII" por fila.
+function confirmSendSet(): void {
+  const documents = selectedDocuments.value
+
+  if (documents.length < 2) {
+    toast.add({ severity: 'warn', summary: 'Selecciona al menos 2 documentos', life: 3000 })
+    return
+  }
+  if (documents.some((d) => d.estado !== 'firmado')) {
+    toast.add({
+      severity: 'warn',
+      summary: 'Todos los seleccionados deben estar firmados (y no enviados todavía)',
+      life: 4000
+    })
+    return
+  }
+
+  confirm.require({
+    message: `Esto sube los ${documents.length} documentos seleccionados al SII en UN SOLO sobre EnvioDTE — es una acción real, no se puede deshacer. ¿Enviar como set?`,
+    header: 'Confirmar envío del set al SII',
+    icon: 'pi pi-exclamation-triangle',
+    acceptLabel: 'Enviar set',
+    acceptProps: { severity: 'danger' },
+    accept: async () => {
+      sendingSet.value = true
+      try {
+        const result = await feathersClient
+          .service('send-document-set')
+          .create({ documentIds: documents.map((d) => d._id) })
+        selectedDocuments.value = []
+        await fetchAll()
+        toast.add({
+          severity: 'success',
+          summary: 'Set enviado al SII',
+          detail: `Identificador de envío: ${result.trackId}`,
+          life: 6000
+        })
+      } catch (e) {
+        toast.add({
+          severity: 'error',
+          summary: 'Error al enviar el set al SII',
+          detail: e instanceof Error ? e.message : undefined,
+          life: 5000
+        })
+      } finally {
+        sendingSet.value = false
+      }
+    }
+  })
+}
 
 function confirmSend(document: DteDocument): void {
   confirm.require({
@@ -843,6 +898,14 @@ onMounted(async () => {
 
     <div v-if="selectedDocuments.length > 0" class="bulk-bar surface-card">
       <span>{{ selectedDocuments.length }} seleccionado(s)</span>
+      <Button
+        label="Enviar como set"
+        icon="pi pi-send"
+        text
+        :loading="sendingSet"
+        title="Sube todos los seleccionados al SII en un solo sobre EnvioDTE — necesario para el Set de Pruebas formal de certificación"
+        @click="confirmSendSet"
+      />
       <Button label="Eliminar seleccionados" icon="pi pi-trash" severity="danger" text @click="confirmDeleteSelected" />
     </div>
 
