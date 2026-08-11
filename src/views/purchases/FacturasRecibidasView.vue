@@ -5,7 +5,10 @@ import Column from 'primevue/column'
 import Button from 'primevue/button'
 import Dialog from 'primevue/dialog'
 import Select from 'primevue/select'
+import Message from 'primevue/message'
+import Menu from 'primevue/menu'
 import Tag from 'primevue/tag'
+import type { MenuItem } from 'primevue/menuitem'
 import { useConfirm } from 'primevue/useconfirm'
 import { useToast } from 'primevue/usetoast'
 import { useResource } from '@/composables/useResource'
@@ -24,14 +27,29 @@ const tipoDteLabel: Record<number, string> = {
   61: 'Nota de crédito'
 }
 
+interface AccionMeta {
+  label: string
+  shortLabel: string
+  value: PurchaseAccionSii
+  // Reclamar (a diferencia de aceptar/acusar recibo) no implica que se
+  // acepte el documento — la compra igual queda registrada (para tener
+  // rastro contable) pero marcada como disputada, no como una deuda
+  // aceptada sin más. Ver registrar-acuse.ts en el server.
+  disputa: boolean
+  icon: string
+}
+
 // El webservice de acuse/reclamo (Ley 19.983) solo entiende Factura
-// (tipoDoc SII 33) — ver la nota en confirm-incoming-invoice.service.ts.
-const accionesSii: { label: string; value: PurchaseAccionSii }[] = [
-  { label: 'Aceptar contenido del documento', value: 'ACD' },
-  { label: 'Reclamar contenido del documento', value: 'RCD' },
-  { label: 'Acuse recibo de mercaderías/servicios', value: 'ERM' },
-  { label: 'Reclamo por falta parcial de mercadería', value: 'RFP' },
-  { label: 'Reclamo por falta total de mercadería', value: 'RFT' }
+// (tipoDoc SII 33) — ver la nota en confirm-incoming-invoice.service.ts. Son
+// acciones DIRECTAS: cada una manda su propia acción al SII y registra la
+// compra en el mismo paso, no un "Confirmar" genérico con una acción
+// opcional escondida adentro.
+const accionesSii: AccionMeta[] = [
+  { label: 'Aceptar contenido del documento', shortLabel: 'Aceptar', value: 'ACD', disputa: false, icon: 'pi-check' },
+  { label: 'Acuse recibo de mercaderías/servicios', shortLabel: 'Acuse recibo', value: 'ERM', disputa: false, icon: 'pi-verified' },
+  { label: 'Reclamar contenido del documento', shortLabel: 'Reclamar', value: 'RCD', disputa: true, icon: 'pi-flag' },
+  { label: 'Reclamo por falta parcial de mercadería', shortLabel: 'Reclamo falta parcial', value: 'RFP', disputa: true, icon: 'pi-flag' },
+  { label: 'Reclamo por falta total de mercadería', shortLabel: 'Reclamo falta total', value: 'RFT', disputa: true, icon: 'pi-flag' }
 ]
 
 function supplierMatch(rut: string): Supplier | undefined {
@@ -46,10 +64,15 @@ const confirmSupplierId = ref<string | null>(null)
 const confirmAccion = ref<PurchaseAccionSii | null>(null)
 const confirming = ref(false)
 
-function openConfirm(invoice: IncomingInvoice): void {
+const confirmAccionMeta = computed(() => accionesSii.find((a) => a.value === confirmAccion.value) ?? null)
+const confirmButtonLabel = computed(() =>
+  confirmAccionMeta.value ? `${confirmAccionMeta.value.shortLabel} y registrar compra` : 'Registrar compra'
+)
+
+function openConfirm(invoice: IncomingInvoice, accion: PurchaseAccionSii | null): void {
   confirmTarget.value = invoice
   confirmSupplierId.value = supplierMatch(invoice.emisorRut)?._id ?? null
-  confirmAccion.value = null
+  confirmAccion.value = accion
   confirmVisible.value = true
 }
 
@@ -70,19 +93,21 @@ async function handleConfirm(): Promise<void> {
     if (result.acuseError) {
       toast.add({
         severity: 'warn',
-        summary: 'Compra registrada, pero el acuse ante el SII falló',
+        summary: 'Compra registrada, pero el aviso al SII falló',
         detail: result.acuseError,
         life: 6000
       })
+    } else if (confirmAccionMeta.value?.disputa) {
+      toast.add({ severity: 'warn', summary: 'Compra registrada como disputada, reclamo informado al SII', life: 3500 })
     } else if (result.acuse) {
-      toast.add({ severity: 'success', summary: 'Compra registrada y acción informada al SII', life: 3000 })
+      toast.add({ severity: 'success', summary: 'Compra registrada y aceptación informada al SII', life: 3000 })
     } else {
       toast.add({ severity: 'success', summary: 'Compra registrada', life: 2500 })
     }
   } catch (e) {
     toast.add({
       severity: 'error',
-      summary: 'Error al confirmar',
+      summary: 'Error al registrar',
       detail: e instanceof Error ? e.message : undefined,
       life: 5000
     })
@@ -113,6 +138,28 @@ function confirmDiscard(invoice: IncomingInvoice): void {
   })
 }
 
+// --- Menú de acciones por fila ---
+const rowMenu = ref()
+const menuInvoice = ref<IncomingInvoice | null>(null)
+
+const rowMenuItems = computed<MenuItem[]>(() => {
+  const invoice = menuInvoice.value
+  if (!invoice) return []
+
+  const items: MenuItem[] =
+    invoice.tipoDte === 33
+      ? accionesSii.map((a) => ({ label: a.label, icon: `pi ${a.icon}`, command: () => openConfirm(invoice, a.value) }))
+      : [{ label: 'Registrar compra', icon: 'pi pi-check', command: () => openConfirm(invoice, null) }]
+
+  items.push({ label: 'Descartar', icon: 'pi pi-times', command: () => confirmDiscard(invoice) })
+  return items
+})
+
+function toggleRowMenu(event: Event, invoice: IncomingInvoice): void {
+  menuInvoice.value = invoice
+  rowMenu.value?.toggle(event)
+}
+
 onMounted(async () => {
   await Promise.all([fetchAll(), fetchSuppliers()])
 })
@@ -127,7 +174,8 @@ onMounted(async () => {
     <p class="page-hint">
       Documentos detectados automáticamente en la
       <router-link to="/casilla-intercambio">Casilla de Intercambio</router-link>
-      — revísalos y confirma para registrarlos como compra, o descártalos si no corresponden.
+      — elige la acción que corresponde (Aceptar, Reclamar, etc.) o descártalos si no corresponden. Cada acción manda
+      la respuesta al SII y registra la compra en el mismo paso.
     </p>
 
     <DataTable :value="incoming" :loading="loading" data-key="_id" striped-rows>
@@ -164,24 +212,34 @@ onMounted(async () => {
         </template>
       </Column>
 
-      <Column header="" style="width: 12rem">
+      <Column header="" style="width: 3.5rem">
         <template #body="{ data }">
-          <div class="row-actions">
-            <Button label="Confirmar" size="small" icon="pi pi-check" @click="openConfirm(data)" />
-            <Button icon="pi pi-times" size="small" text severity="danger" @click="confirmDiscard(data)" />
-          </div>
+          <Button icon="pi pi-ellipsis-v" text @click="toggleRowMenu($event, data)" />
         </template>
       </Column>
 
       <template #empty>No hay facturas pendientes de revisión.</template>
     </DataTable>
 
-    <Dialog v-model:visible="confirmVisible" modal header="Confirmar factura recibida" style="width: 480px">
+    <Menu ref="rowMenu" :model="rowMenuItems" :popup="true" />
+
+    <Dialog
+      v-model:visible="confirmVisible"
+      modal
+      :header="confirmAccionMeta ? confirmAccionMeta.label : 'Registrar compra'"
+      style="width: 480px"
+    >
       <div v-if="confirmTarget" class="form-grid">
         <p class="confirm-summary">
           {{ tipoDteLabel[confirmTarget.tipoDte] ?? `Tipo ${confirmTarget.tipoDte}` }} folio {{ confirmTarget.folio }} —
           {{ confirmTarget.emisorRazonSocial ?? confirmTarget.emisorRut }} — ${{ confirmTarget.montoTotal.toLocaleString('es-CL') }}
         </p>
+
+        <Message v-if="confirmAccionMeta?.disputa" severity="warn" :closable="false">
+          Vas a reclamar este documento ante el SII — la compra queda registrada como disputada (no aceptada), no
+          como una deuda confirmada.
+        </Message>
+
         <label class="field">
           <span>Proveedor</span>
           <Select
@@ -194,20 +252,15 @@ onMounted(async () => {
             :placeholder="`Se creará uno nuevo con RUT ${confirmTarget.emisorRut}`"
           />
         </label>
-        <label v-if="confirmTarget.tipoDte === 33" class="field">
-          <span>Acción ante el SII (opcional)</span>
-          <Select
-            v-model="confirmAccion"
-            :options="accionesSii"
-            option-label="label"
-            option-value="value"
-            show-clear
-            placeholder="Solo registrar la compra, sin informar acción todavía"
-          />
-        </label>
+
         <div class="form-actions">
           <Button label="Cancelar" text @click="confirmVisible = false" />
-          <Button label="Confirmar y registrar compra" :loading="confirming" @click="handleConfirm" />
+          <Button
+            :label="confirmButtonLabel"
+            :severity="confirmAccionMeta?.disputa ? 'danger' : undefined"
+            :loading="confirming"
+            @click="handleConfirm"
+          />
         </div>
       </div>
     </Dialog>
@@ -244,11 +297,6 @@ onMounted(async () => {
   font-size: 0.78rem;
   color: var(--text-secondary);
   font-weight: 400;
-}
-
-.row-actions {
-  display: flex;
-  gap: 0.4rem;
 }
 
 .form-grid {

@@ -53,6 +53,12 @@ const accionSiiLabel: Record<PurchaseAccionSii, string> = {
   RFT: 'Reclamo falta total'
 }
 
+// Reclamar (a diferencia de aceptar/acusar recibo) no implica que se acepte
+// el documento — ver la nota en confirm-incoming-invoice.service.ts. El tag
+// de abajo lo refleja en el color independiente de si la llamada al SII en
+// sí misma tuvo éxito (codResp) — son dos cosas distintas.
+const ACCIONES_DISPUTA: PurchaseAccionSii[] = ['RCD', 'RFP', 'RFT']
+
 const supplierOptions = computed(() => suppliers.value.map((s) => ({ label: s.razonSocial, value: s._id })))
 
 function supplierOf(id: string): Supplier | undefined {
@@ -406,7 +412,13 @@ onMounted(async () => {
         <template #body="{ data }">
           <Tag
             v-if="data.siiAcuse"
-            :severity="data.siiAcuse.codResp === 0 ? 'success' : 'danger'"
+            :severity="
+              data.siiAcuse.codResp !== 0
+                ? 'danger'
+                : ACCIONES_DISPUTA.includes(data.siiAcuse.accion as PurchaseAccionSii)
+                  ? 'warn'
+                  : 'success'
+            "
             :value="accionSiiLabel[data.siiAcuse.accion as PurchaseAccionSii]"
             :title="data.siiAcuse.descResp"
           />
