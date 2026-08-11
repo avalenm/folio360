@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Button from 'primevue/button'
@@ -9,6 +9,7 @@ import Select from 'primevue/select'
 import DatePicker from 'primevue/datepicker'
 import Textarea from 'primevue/textarea'
 import Tag from 'primevue/tag'
+import ToggleSwitch from 'primevue/toggleswitch'
 import { useConfirm } from 'primevue/useconfirm'
 import { useToast } from 'primevue/usetoast'
 import { useResource } from '@/composables/useResource'
@@ -22,6 +23,52 @@ const ambientes = [
   { label: 'Certificación', value: 'certificacion' },
   { label: 'Producción', value: 'produccion' }
 ]
+
+// Mismos nombres que usan documents/DocumentsView.vue y pdf/dte-pdf.ts —
+// tipos de DTE ya implementados (ver signing/dte-xml.ts).
+const TIPO_DTE_NOMBRE: Record<number, string> = {
+  33: 'Factura Electrónica',
+  34: 'Factura No Afecta o Exenta Electrónica',
+  46: 'Factura de Compra Electrónica',
+  52: 'Guía de Despacho Electrónica',
+  56: 'Nota de Débito Electrónica',
+  61: 'Nota de Crédito Electrónica'
+}
+
+function nombreTipoDte(tipoDte: number): string {
+  return TIPO_DTE_NOMBRE[tipoDte] ?? `Tipo ${tipoDte}`
+}
+
+// Un CAF queda sin folios cuando folioActual llega a folioHasta (reserve-folio.ts
+// nunca lo deja pasar de ahí). Una vez agotado ya no aporta nada a la vista del
+// día a día, así que se oculta de la tabla en cuanto se completa — se puede
+// destapar con el switch para efectos de auditoría, pero no se borra de la BD.
+const mostrarAgotados = ref(false)
+
+function folioDisponibles(caf: Caf): number {
+  return caf.folioHasta - caf.folioActual
+}
+
+const visibleItems = computed(() =>
+  mostrarAgotados.value ? items.value : items.value.filter((caf) => folioDisponibles(caf) > 0)
+)
+
+// Balance de folios disponibles por tipo de DTE + ambiente. Separados por
+// ambiente porque un folio de certificación jamás puede usarse en producción
+// (ver caf.model.ts) — mezclarlos en un solo total sería engañoso.
+const balanceFolios = computed(() => {
+  const porGrupo = new Map<string, { tipoDte: number; ambiente: Caf['ambiente']; disponibles: number }>()
+
+  for (const caf of items.value) {
+    if (caf.estado !== 'activo') continue
+    const key = `${caf.tipoDte}-${caf.ambiente}`
+    const grupo = porGrupo.get(key) ?? { tipoDte: caf.tipoDte, ambiente: caf.ambiente, disponibles: 0 }
+    grupo.disponibles += folioDisponibles(caf)
+    porGrupo.set(key, grupo)
+  }
+
+  return [...porGrupo.values()].sort((a, b) => a.tipoDte - b.tipoDte || a.ambiente.localeCompare(b.ambiente))
+})
 
 const dialogVisible = ref(false)
 const saving = ref(false)
@@ -141,8 +188,29 @@ onMounted(fetchAll)
       <Button label="Cargar CAF" icon="pi pi-plus" @click="openCreate" />
     </div>
 
-    <DataTable :value="items" :loading="loading" data-key="_id" striped-rows>
-      <Column field="tipoDte" header="Tipo DTE" />
+    <div class="balance-grid">
+      <article v-for="grupo in balanceFolios" :key="`${grupo.tipoDte}-${grupo.ambiente}`" class="balance-card surface-card">
+        <div class="balance-top">
+          <span class="balance-nombre">{{ nombreTipoDte(grupo.tipoDte) }} ({{ grupo.tipoDte }})</span>
+          <Tag :severity="grupo.ambiente === 'produccion' ? 'danger' : 'info'" :value="grupo.ambiente" />
+        </div>
+        <span class="balance-valor">{{ grupo.disponibles.toLocaleString('es-CL') }}</span>
+        <span class="balance-label">folios disponibles</span>
+      </article>
+      <p v-if="!balanceFolios.length && !loading" class="balance-empty">Sin CAF activos cargados.</p>
+    </div>
+
+    <div class="table-toolbar">
+      <label class="toggle-agotados">
+        <ToggleSwitch v-model="mostrarAgotados" />
+        <span>Mostrar CAF agotados</span>
+      </label>
+    </div>
+
+    <DataTable :value="visibleItems" :loading="loading" data-key="_id" striped-rows>
+      <Column field="tipoDte" header="Tipo DTE">
+        <template #body="{ data }">{{ nombreTipoDte(data.tipoDte) }} ({{ data.tipoDte }})</template>
+      </Column>
       <Column header="Ambiente">
         <template #body="{ data }">
           <Tag :severity="data.ambiente === 'produccion' ? 'danger' : 'info'" :value="data.ambiente" />
@@ -152,6 +220,9 @@ onMounted(fetchAll)
         <template #body="{ data }">{{ data.folioDesde }} – {{ data.folioHasta }}</template>
       </Column>
       <Column field="folioActual" header="Folio actual" />
+      <Column header="Disponibles">
+        <template #body="{ data }">{{ folioDisponibles(data) }}</template>
+      </Column>
       <Column header="Estado">
         <template #body="{ data }">
           <Tag :severity="data.estado === 'activo' ? 'success' : 'warn'" :value="data.estado" />
@@ -215,6 +286,64 @@ onMounted(fetchAll)
 .page-title {
   margin: 0;
   font-size: 1.4rem;
+}
+
+.balance-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0.9rem;
+  margin-bottom: 1.25rem;
+}
+
+.balance-card {
+  padding: 1rem 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.balance-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.balance-nombre {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #334155;
+}
+
+.balance-valor {
+  font-size: 1.6rem;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.balance-label {
+  font-size: 0.78rem;
+  color: #64748b;
+}
+
+.balance-empty {
+  color: #64748b;
+  font-size: 0.9rem;
+}
+
+.table-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 0.75rem;
+}
+
+.toggle-agotados {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #334155;
 }
 
 .form-grid {
