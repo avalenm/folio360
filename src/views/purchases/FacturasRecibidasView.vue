@@ -10,7 +10,7 @@ import { useConfirm } from 'primevue/useconfirm'
 import { useToast } from 'primevue/usetoast'
 import { useResource } from '@/composables/useResource'
 import { feathersClient } from '@/services/feathers'
-import type { IncomingInvoice, Supplier } from '@/types'
+import type { IncomingInvoice, PurchaseAccionSii, Supplier } from '@/types'
 
 const { items: incoming, loading, fetchAll, remove } = useResource<IncomingInvoice>('incoming-invoices')
 const { items: suppliers, fetchAll: fetchSuppliers } = useResource<Supplier>('suppliers')
@@ -24,6 +24,16 @@ const tipoDteLabel: Record<number, string> = {
   61: 'Nota de crédito'
 }
 
+// El webservice de acuse/reclamo (Ley 19.983) solo entiende Factura
+// (tipoDoc SII 33) — ver la nota en confirm-incoming-invoice.service.ts.
+const accionesSii: { label: string; value: PurchaseAccionSii }[] = [
+  { label: 'Aceptar contenido del documento', value: 'ACD' },
+  { label: 'Reclamar contenido del documento', value: 'RCD' },
+  { label: 'Acuse recibo de mercaderías/servicios', value: 'ERM' },
+  { label: 'Reclamo por falta parcial de mercadería', value: 'RFP' },
+  { label: 'Reclamo por falta total de mercadería', value: 'RFT' }
+]
+
 function supplierMatch(rut: string): Supplier | undefined {
   return suppliers.value.find((s) => s.rut === rut)
 }
@@ -33,11 +43,13 @@ const supplierOptions = computed(() => suppliers.value.map((s) => ({ label: `${s
 const confirmVisible = ref(false)
 const confirmTarget = ref<IncomingInvoice | null>(null)
 const confirmSupplierId = ref<string | null>(null)
+const confirmAccion = ref<PurchaseAccionSii | null>(null)
 const confirming = ref(false)
 
 function openConfirm(invoice: IncomingInvoice): void {
   confirmTarget.value = invoice
   confirmSupplierId.value = supplierMatch(invoice.emisorRut)?._id ?? null
+  confirmAccion.value = null
   confirmVisible.value = true
 }
 
@@ -47,13 +59,26 @@ async function handleConfirm(): Promise<void> {
 
   confirming.value = true
   try {
-    await feathersClient.service('confirm-incoming-invoice').create({
+    const result = await feathersClient.service('confirm-incoming-invoice').create({
       incomingInvoiceId: invoice._id,
-      supplierId: confirmSupplierId.value ?? undefined
+      supplierId: confirmSupplierId.value ?? undefined,
+      accion: confirmAccion.value ?? undefined
     })
     incoming.value = incoming.value.filter((i) => i._id !== invoice._id)
     confirmVisible.value = false
-    toast.add({ severity: 'success', summary: 'Compra registrada', life: 2500 })
+
+    if (result.acuseError) {
+      toast.add({
+        severity: 'warn',
+        summary: 'Compra registrada, pero el acuse ante el SII falló',
+        detail: result.acuseError,
+        life: 6000
+      })
+    } else if (result.acuse) {
+      toast.add({ severity: 'success', summary: 'Compra registrada y acción informada al SII', life: 3000 })
+    } else {
+      toast.add({ severity: 'success', summary: 'Compra registrada', life: 2500 })
+    }
   } catch (e) {
     toast.add({
       severity: 'error',
@@ -167,6 +192,17 @@ onMounted(async () => {
             filter
             show-clear
             :placeholder="`Se creará uno nuevo con RUT ${confirmTarget.emisorRut}`"
+          />
+        </label>
+        <label v-if="confirmTarget.tipoDte === 33" class="field">
+          <span>Acción ante el SII (opcional)</span>
+          <Select
+            v-model="confirmAccion"
+            :options="accionesSii"
+            option-label="label"
+            option-value="value"
+            show-clear
+            placeholder="Solo registrar la compra, sin informar acción todavía"
           />
         </label>
         <div class="form-actions">
