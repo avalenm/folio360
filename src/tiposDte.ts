@@ -22,7 +22,7 @@ export interface TipoDte {
 export const TIPOS_DTE: TipoDte[] = [
   { value: 33, label: 'Factura Electrónica', corto: 'Factura', emitible: true },
   { value: 34, label: 'Factura No Afecta o Exenta Electrónica', corto: 'Factura exenta', emitible: true },
-  { value: 43, label: 'Liquidación-Factura Electrónica', corto: 'Liquidación-factura', emitible: false },
+  { value: 43, label: 'Liquidación-Factura Electrónica', corto: 'Liquidación-factura', emitible: true },
   { value: 46, label: 'Factura de Compra Electrónica', corto: 'Factura de compra', emitible: true },
   { value: 52, label: 'Guía de Despacho Electrónica', corto: 'Guía de despacho', emitible: true },
   { value: 56, label: 'Nota de Débito Electrónica', corto: 'Nota de débito', emitible: true },

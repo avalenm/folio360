@@ -129,6 +129,22 @@ export interface DteItem {
   // Unidad de medida de la línea (máximo 4 caracteres) — ver
   // document.model.ts en el servidor.
   unidad?: string
+  // Monto de la línea cuando viene dado y no se calcula como cantidad ×
+  // precio, y el código del documento que la línea liquida. Ambos son de la
+  // Liquidación-Factura (43).
+  montoLinea?: number
+  tipoDocLiq?: number
+}
+
+// Una línea de "Comisiones y Otros Cargos": lo que cobra el mandatario en
+// una Liquidación-Factura. Se resta del total del documento.
+export interface DteComision {
+  tipoMovim: 'C' | 'O'
+  glosa: string
+  tasa?: number
+  neto: number
+  exento: number
+  iva: number
 }
 
 export interface DtePago {
@@ -176,6 +192,8 @@ export interface DteDocument {
   guiaFacturada?: { tipoDte: number; folio: number; fecha: string }
   guiaAnulada?: { fecha: string; motivo?: string }
   items: DteItem[]
+  // Solo para Liquidación-Factura (43), donde el área es obligatoria.
+  comisiones?: DteComision[]
   // Descuento global (%) sobre el subtotal de ítems afectos — ver
   // document.model.ts en el servidor.
   descuentoGlobalPct?: number

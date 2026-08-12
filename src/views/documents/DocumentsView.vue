@@ -40,6 +40,26 @@ const TIPOS_DTE_REQUIEREN_TRASLADO = [52]
 // El <Receptor> del DTE lleva los datos del PROVEEDOR, no de un cliente —
 // ver document.model.ts en el servidor.
 const TIPOS_DTE_COMPRA = [46]
+
+// Liquidación-Factura: cada línea resume un conjunto de documentos, así que
+// lleva el monto directo (no cantidad × precio) y el código del documento
+// que liquida. Además tiene su propia zona de comisiones — lo que cobra el
+// mandatario, que se resta del total.
+const TIPO_DTE_LIQUIDACION = 43
+
+// Códigos válidos para <TpoDocLiq>. El código identifica el DOCUMENTO, no si
+// la línea es neta o exenta: las dos líneas de una misma factura llevan el
+// mismo. Ver sii-dte-montos-cero en la memoria del proyecto.
+const DOCUMENTOS_LIQUIDABLES = [
+  { label: 'Factura (30)', value: 30 },
+  { label: 'Factura electrónica (33)', value: 33 },
+  { label: 'Boletas (35)', value: 35 },
+  { label: 'Boleta electrónica (39)', value: 39 },
+  { label: 'Nota de crédito (60)', value: 60 },
+  { label: 'Nota de crédito electrónica (61)', value: 61 },
+  { label: 'Liquidación-factura electrónica (43)', value: 43 },
+  { label: 'Anticipo u otra transacción (99)', value: 99 }
+]
 // "El documento no podrá exceder de 60 líneas de ítem Detalle" — límite del
 // SII (Formato Documentos Tributarios Electrónicos §2.1), también validado
 // server-side en documents.service.ts. Acá solo evita que el usuario llegue
@@ -194,6 +214,22 @@ const dialogVisible = ref(false)
 const editingId = ref<string | null>(null)
 const saving = ref(false)
 
+interface ComisionDraft {
+  key: number
+  tipoMovim: 'C' | 'O'
+  glosa: string
+  neto: number
+  exento: number
+  iva: number
+}
+
+let comisionKeySeq = 0
+
+function blankComision(): ComisionDraft {
+  comisionKeySeq += 1
+  return { key: comisionKeySeq, tipoMovim: 'C', glosa: '', neto: 0, exento: 0, iva: 0 }
+}
+
 interface ItemDraft extends DteItem {
   key: number
 }
@@ -202,6 +238,7 @@ let itemKeySeq = 0
 
 function montoItem(item: ItemDraft): number {
   if (sinMontos.value) return 0
+  if (item.montoLinea !== undefined) return item.montoLinea
   return Math.round(item.cantidad * item.precioUnit - (item.descuento ?? 0))
 }
 
@@ -286,7 +323,8 @@ const draft = reactive({
   indTraslado: 1,
   tpoDespacho: null as number | null,
   descuentoGlobalPct: 0,
-  items: [blankItem()] as ItemDraft[]
+  items: [blankItem()] as ItemDraft[],
+  comisiones: [] as ComisionDraft[]
 })
 
 // Una Factura No Afecta o Exenta (34) solo puede tener ítems exentos (ver
@@ -367,6 +405,8 @@ function copiarItemsReferencia(): void {
 // venta. El servidor los normaliza al guardar (ver documents.service.ts y
 // montos.ts), así que la vista previa tiene que reflejar lo mismo — si no,
 // muestra un total que el documento emitido no va a tener.
+const esLiquidacion = computed(() => draft.tipoDte === TIPO_DTE_LIQUIDACION)
+
 const sinMontos = computed(
   () =>
     (TIPOS_DTE_REQUIEREN_REFERENCIA.includes(draft.tipoDte) &&
@@ -380,14 +420,14 @@ const sinMontos = computed(
 // de guardar.
 const montosPreview = computed(() => {
   if (sinMontos.value) {
-    return { netoBruto: 0, descuentoGlobal: 0, neto: 0, exento: 0, iva: 0, total: 0 }
+    return { netoBruto: 0, descuentoGlobal: 0, neto: 0, exento: 0, iva: 0, comision: 0, total: 0 }
   }
 
   let netoBruto = 0
   let exento = 0
 
   for (const item of draft.items) {
-    const monto = Math.round(item.cantidad * item.precioUnit - (item.descuento ?? 0))
+    const monto = item.montoLinea ?? Math.round(item.cantidad * item.precioUnit - (item.descuento ?? 0))
     if (item.exento) exento += monto
     else netoBruto += monto
   }
@@ -395,7 +435,10 @@ const montosPreview = computed(() => {
   const descuentoGlobal = draft.descuentoGlobalPct ? Math.round(netoBruto * (draft.descuentoGlobalPct / 100)) : 0
   const neto = netoBruto - descuentoGlobal
   const iva = Math.round(neto * 0.19)
-  return { netoBruto, descuentoGlobal, neto, exento, iva, total: neto + iva + exento }
+  // Lo que cobra el mandatario se resta del total: el documento liquida lo
+  // que se le entrega al mandante ya descontada la comisión.
+  const comision = draft.comisiones.reduce((sum, c) => sum + c.neto + c.exento + c.iva, 0)
+  return { netoBruto, descuentoGlobal, neto, exento, iva, comision, total: neto + iva + exento - comision }
 })
 
 function openCreate(): void {
@@ -412,6 +455,7 @@ function openCreate(): void {
   draft.tpoDespacho = null
   draft.descuentoGlobalPct = 0
   draft.items = [blankItem()]
+  draft.comisiones = []
   dialogVisible.value = true
 }
 
@@ -432,6 +476,7 @@ function openEdit(document: DteDocument): void {
   draft.tpoDespacho = document.tpoDespacho ?? null
   draft.descuentoGlobalPct = document.descuentoGlobalPct ?? 0
   draft.items = document.items.map((item) => ({ ...item, key: (itemKeySeq += 1) }))
+  draft.comisiones = (document.comisiones ?? []).map((c) => ({ ...c, key: (comisionKeySeq += 1) }))
   dialogVisible.value = true
 }
 
@@ -503,7 +548,10 @@ async function handleSave(): Promise<void> {
             : undefined,
         descuentoGlobalPct: draft.tipoDte !== 34 && draft.descuentoGlobalPct ? draft.descuentoGlobalPct : undefined,
         referencias,
-        items
+        items,
+        comisiones: esLiquidacion.value
+          ? draft.comisiones.map(({ key: _key, ...comision }) => comision)
+          : undefined
       })
     }
     dialogVisible.value = false
@@ -1348,10 +1396,11 @@ onMounted(async () => {
             <div class="items-head">
               <span class="col-producto">Producto</span>
               <span class="col-descripcion">Descripción</span>
+              <span v-if="esLiquidacion" class="col-num">Documento</span>
               <span class="col-num">Cantidad</span>
-              <span class="col-unidad">Unidad</span>
-              <span class="col-num">Precio unit.</span>
-              <span class="col-num">Descuento</span>
+              <span v-if="!esLiquidacion" class="col-unidad">Unidad</span>
+              <span v-if="!esLiquidacion" class="col-num">Precio unit.</span>
+              <span class="col-num">{{ esLiquidacion ? 'Total línea' : 'Descuento' }}</span>
               <span class="col-exento">Exento</span>
               <span class="col-total">Total</span>
               <span class="col-remove"></span>
@@ -1374,17 +1423,30 @@ onMounted(async () => {
               <div class="col-descripcion">
                 <InputText v-model="item.descripcion" placeholder="Descripción del ítem" fluid required />
               </div>
+              <div v-if="esLiquidacion" class="col-num">
+                <Select
+                  v-model="item.tipoDocLiq"
+                  :options="DOCUMENTOS_LIQUIDABLES"
+                  option-label="label"
+                  option-value="value"
+                  placeholder="Tipo"
+                />
+              </div>
               <div class="col-num">
                 <InputNumber v-model="item.cantidad" :min="0" fluid />
               </div>
-              <div class="col-unidad">
+              <div v-if="!esLiquidacion" class="col-unidad">
                 <InputText v-model="item.unidad" :maxlength="4" placeholder="Un" fluid />
               </div>
-              <div class="col-num">
+              <div v-if="!esLiquidacion" class="col-num">
                 <InputNumber v-model="item.precioUnit" :min="0" mode="decimal" fluid :disabled="sinMontos" />
               </div>
               <div class="col-num">
-                <InputNumber v-model="item.descuento" :min="0" mode="decimal" fluid :disabled="sinMontos" />
+                <!-- En una liquidación la línea resume documentos: el monto
+                     viene dado (y puede ser negativo si es una nota de
+                     crédito), no se calcula como cantidad × precio. -->
+                <InputNumber v-if="esLiquidacion" v-model="item.montoLinea" mode="decimal" fluid />
+                <InputNumber v-else v-model="item.descuento" :min="0" mode="decimal" fluid :disabled="sinMontos" />
               </div>
               <div class="col-exento">
                 <ToggleSwitch v-model="item.exento" :disabled="draft.tipoDte === 34" />
@@ -1422,6 +1484,9 @@ onMounted(async () => {
         </section>
 
         <div class="totals-preview">
+          <div v-if="montosPreview.comision !== 0" class="totals-row">
+            <span>Comisiones</span><span>−${{ montosPreview.comision.toLocaleString('es-CL') }}</span>
+          </div>
           <div v-if="montosPreview.descuentoGlobal > 0" class="totals-row">
             <span>Subtotal afecto</span><span>${{ montosPreview.netoBruto.toLocaleString('es-CL') }}</span>
           </div>
@@ -1962,6 +2027,22 @@ onMounted(async () => {
 .item-row > * {
   min-width: 0;
   overflow: hidden;
+}
+
+.comisiones-head,
+.comisiones-row {
+  display: grid;
+  grid-template-columns: 8rem 1fr 7rem 7rem 7rem 2.25rem;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.5rem 0.75rem;
+}
+
+.comisiones-head {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border);
 }
 
 .col-exento {
