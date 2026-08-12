@@ -234,7 +234,7 @@ function montoItem(item: ItemDraft): number {
 // initialization" (encontrado en vivo con Playwright, no era solo hipotético).
 function blankItem(exento = false): ItemDraft {
   itemKeySeq += 1
-  return { key: itemKeySeq, descripcion: '', cantidad: 1, precioUnit: 0, descuento: 0, exento }
+  return { key: itemKeySeq, descripcion: '', cantidad: 1, precioUnit: 0, descuento: 0, exento, unidad: '' }
 }
 
 // Valor de la UF del día (mindicador.cl vía el backend, ver external/uf.ts).
@@ -272,6 +272,7 @@ async function applyProduct(item: ItemDraft, productId: string | null): Promise<
   // sin importar cómo esté catalogado el producto — ver validación en
   // documents.service.ts.
   item.exento = draft.tipoDte === 34 ? true : product.exento
+  item.unidad = product.unidad
 
   if (product.moneda === 'UF') {
     try {
@@ -1372,6 +1373,7 @@ onMounted(async () => {
               <span class="col-producto">Producto</span>
               <span class="col-descripcion">Descripción</span>
               <span class="col-num">Cantidad</span>
+              <span class="col-unidad">Unidad</span>
               <span class="col-num">Precio unit.</span>
               <span class="col-num">Descuento</span>
               <span class="col-exento">Exento</span>
@@ -1398,6 +1400,9 @@ onMounted(async () => {
               </div>
               <div class="col-num">
                 <InputNumber v-model="item.cantidad" :min="0" fluid />
+              </div>
+              <div class="col-unidad">
+                <InputText v-model="item.unidad" :maxlength="4" placeholder="Un" fluid />
               </div>
               <div class="col-num">
                 <InputNumber v-model="item.precioUnit" :min="0" mode="decimal" fluid :disabled="sinMontos" />
@@ -1947,7 +1952,7 @@ onMounted(async () => {
 .items-head,
 .item-row {
   display: grid;
-  grid-template-columns: 1.2fr 1.8fr 5rem 7rem 6rem 4rem 7rem 2.25rem;
+  grid-template-columns: 1.2fr 1.8fr 5rem 4rem 7rem 6rem 4rem 7rem 2.25rem;
   align-items: center;
   gap: 0.6rem;
 }

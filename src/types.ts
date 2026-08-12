@@ -126,6 +126,9 @@ export interface DteItem {
   precioUnit: number
   descuento: number
   exento: boolean
+  // Unidad de medida de la línea (máximo 4 caracteres) — ver
+  // document.model.ts en el servidor.
+  unidad?: string
 }
 
 export interface DtePago {
