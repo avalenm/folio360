@@ -60,9 +60,20 @@ const errorMsg = ref<string | null>(null)
 // guías), así que trae su propio resumen y el conteo sale de ahí.
 const guias = computed(() => resultado.value?.resumenGuias)
 
+// Las tres categorías del resumen son excluyentes entre sí: una guía anulada
+// no cuenta como guía de venta ni entra en la tabla de traslados (así lo
+// define el formato, ver libro-builder.ts en el servidor), así que hay que
+// sumar las tres o el total queda corto.
 const totalDocumentos = computed(() => {
   const g = guias.value
-  if (g) return g.totGuiaVenta + (g.totTraslado?.reduce((sum, t) => sum + t.cantGuia, 0) ?? 0)
+  if (g) {
+    return (
+      g.totGuiaVenta +
+      (g.totGuiaAnulada ?? 0) +
+      (g.totFolAnulado ?? 0) +
+      (g.totTraslado?.reduce((sum, t) => sum + t.cantGuia, 0) ?? 0)
+    )
+  }
   return resultado.value?.resumen.reduce((sum, r) => sum + r.totDoc, 0) ?? 0
 })
 
@@ -180,8 +191,8 @@ function descargar(): void {
     </p>
 
     <p v-if="tipo === 'guias'" class="page-hint">
-      El Libro de Guías declara qué pasó con cada Guía de Despacho del período: cuáles se facturaron —su monto ya lo
-      declara la factura— y cuáles se anularon. Eso se marca en cada guía desde Documentos. Solo existe pedido por
+      El Libro de Guías declara qué pasó con cada Guía de Despacho del período: cuáles se facturaron —indicando qué
+      factura las reemplazó— y cuáles se anularon. Eso se marca en cada guía desde Documentos. Solo existe pedido por
       notificación del SII, así que el folio de notificación es obligatorio.
     </p>
 
