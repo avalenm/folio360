@@ -175,9 +175,8 @@ function descargar(): void {
     </div>
 
     <p class="page-hint">
-      Genera y firma la Información Electrónica de Compras y Ventas (IECV) del período seleccionado a partir de los
-      documentos ya registrados. Primero se genera para revisar el resumen, y recién ahí se envía al SII: un libro
-      enviado no se puede deshacer.
+      Genera y firma el libro del período seleccionado a partir de los documentos ya registrados. Primero se genera
+      para revisar el resumen, y recién ahí se envía al SII: un libro enviado no se puede deshacer.
     </p>
 
     <p v-if="tipo === 'guias'" class="page-hint">
