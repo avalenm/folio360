@@ -50,11 +50,18 @@ function signoVenta(tipoDte: number): number {
   return 1
 }
 
+// Los documentos de certificación son pruebas: no son ventas reales y no
+// pueden mezclarse con las de producción. Se muestran solo los del ambiente
+// en que está la organización, igual que hace el Libro de Ventas.
+const documentosDelAmbiente = computed(() =>
+  documents.value.filter((doc) => doc.ambiente === auth.currentOrganization?.ambiente)
+)
+
 // El período tributario lo marca la fecha de EMISIÓN, no cuándo se creó el
 // borrador: un documento preparado a fin de mes y emitido al mes siguiente
 // pertenece al mes en que se emitió.
 const documentosDelMes = computed(() =>
-  documents.value.filter(
+  documentosDelAmbiente.value.filter(
     (doc) =>
       !ESTADOS_ANULADOS.includes(doc.estado) &&
       signoVenta(doc.tipoDte) !== 0 &&
@@ -70,7 +77,7 @@ const ivaDelMes = computed(() =>
 )
 
 const documentosPorCobrarList = computed(() =>
-  documents.value.filter(
+  documentosDelAmbiente.value.filter(
     (doc) =>
       signoVenta(doc.tipoDte) !== 0 && doc.montoPagado < doc.montos.total && ESTADOS_EMITIDOS.includes(doc.estado)
   )
@@ -82,8 +89,27 @@ const porCobrar = computed(() =>
   )
 )
 
-const comprasPorPagarList = computed(() => purchases.value.filter((purchase) => !purchase.pagado))
-const porPagar = computed(() => comprasPorPagarList.value.reduce((sum, purchase) => sum + purchase.montoTotal, 0))
+// Una Factura de Compra (46) la emitimos nosotros, pero documenta una compra:
+// es deuda con el proveedor. Se cuenta acá, no en las ventas.
+//
+// Para que no se cuente dos veces, se excluyen las compras registradas a mano
+// como 'factura_compra': son el mismo documento cargado por el otro lado. La
+// fuente que manda es el DTE emitido, que es el documento tributario real.
+const facturasDeCompraEmitidas = computed(() =>
+  documentosDelAmbiente.value.filter(
+    (doc) => doc.tipoDte === 46 && doc.montoPagado < doc.montos.total && ESTADOS_EMITIDOS.includes(doc.estado)
+  )
+)
+
+const comprasPorPagarList = computed(() =>
+  purchases.value.filter((purchase) => !purchase.pagado && purchase.tipoDocumento !== 'factura_compra')
+)
+
+const porPagar = computed(
+  () =>
+    comprasPorPagarList.value.reduce((sum, purchase) => sum + purchase.montoTotal, 0) +
+    facturasDeCompraEmitidas.value.reduce((sum, doc) => sum + (doc.montos.total - doc.montoPagado), 0)
+)
 
 function formatCurrency(value: number): string {
   return value.toLocaleString('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 })
