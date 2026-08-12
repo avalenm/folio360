@@ -76,18 +76,44 @@ const ivaDelMes = computed(() =>
   documentosDelMes.value.reduce((sum, doc) => sum + signoVenta(doc.tipoDte) * doc.montos.iva, 0)
 )
 
+// Una nota de crédito no es algo "por cobrar": rebaja lo que el cliente debe
+// por OTRO documento. Se descuenta del saldo de la factura que referencia, no
+// como una línea suelta — si se restara por su cuenta, seguiría restando para
+// siempre incluso después de que la factura quedó pagada, y la cobranza
+// terminaría en negativo.
+const creditosPorDocumento = computed(() => {
+  const porDocumento = new Map<string, number>()
+
+  for (const doc of documentosDelAmbiente.value) {
+    if (doc.tipoDte !== 61 || !ESTADOS_EMITIDOS.includes(doc.estado)) continue
+
+    // La primera referencia a un documento real (en certificación la primera
+    // es "SET", que no apunta a ningún folio nuestro).
+    const referencia = (doc.referencias ?? []).find((ref) => typeof ref.tipoDteRef === 'number')
+    if (!referencia) continue
+
+    const clave = `${referencia.tipoDteRef}-${referencia.folioRef}`
+    porDocumento.set(clave, (porDocumento.get(clave) ?? 0) + doc.montos.total)
+  }
+
+  return porDocumento
+})
+
+function saldoPorCobrar(doc: DteDocument): number {
+  const credito = doc.folio != null ? (creditosPorDocumento.value.get(`${doc.tipoDte}-${doc.folio}`) ?? 0) : 0
+  // Nunca negativo: si las notas de crédito superan lo facturado, el cliente
+  // no pasa a deberte menos que cero.
+  return Math.max(0, doc.montos.total - doc.montoPagado - credito)
+}
+
 const documentosPorCobrarList = computed(() =>
   documentosDelAmbiente.value.filter(
     (doc) =>
-      signoVenta(doc.tipoDte) !== 0 && doc.montoPagado < doc.montos.total && ESTADOS_EMITIDOS.includes(doc.estado)
+      signoVenta(doc.tipoDte) > 0 && ESTADOS_EMITIDOS.includes(doc.estado) && saldoPorCobrar(doc) > 0
   )
 )
-const porCobrar = computed(() =>
-  documentosPorCobrarList.value.reduce(
-    (sum, doc) => sum + signoVenta(doc.tipoDte) * (doc.montos.total - doc.montoPagado),
-    0
-  )
-)
+
+const porCobrar = computed(() => documentosPorCobrarList.value.reduce((sum, doc) => sum + saldoPorCobrar(doc), 0))
 
 // Una Factura de Compra (46) la emitimos nosotros, pero documenta una compra:
 // es deuda con el proveedor. Se cuenta acá, no en las ventas.
