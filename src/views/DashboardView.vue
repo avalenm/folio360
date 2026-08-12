@@ -32,18 +32,54 @@ function isSameMonth(dateStr: string): boolean {
   return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth()
 }
 
+// Cuánto aporta cada tipo de documento a las ventas del período:
+//
+//  +1  Factura (33), Factura Exenta (34) y Nota de Débito (56): la nota de
+//      débito aumenta lo facturado.
+//  -1  Nota de Crédito (61): rebaja una venta ya emitida (devolución,
+//      descuento o anulación), así que RESTA. Sumarla infla las ventas, el
+//      IVA y la cobranza al mismo tiempo.
+//   0  Guía de Despacho (52): no es una venta tributaria. La venta la
+//      documenta la factura que la respalda; contar ambas duplicaría.
+//   0  Factura de Compra (46): la emitimos nosotros, pero documenta una
+//      COMPRA — es plata que se le debe al proveedor, no una venta ni algo
+//      por cobrar.
+function signoVenta(tipoDte: number): number {
+  if (tipoDte === 61) return -1
+  if (tipoDte === 52 || tipoDte === 46) return 0
+  return 1
+}
+
+// El período tributario lo marca la fecha de EMISIÓN, no cuándo se creó el
+// borrador: un documento preparado a fin de mes y emitido al mes siguiente
+// pertenece al mes en que se emitió.
 const documentosDelMes = computed(() =>
-  documents.value.filter((doc) => !ESTADOS_ANULADOS.includes(doc.estado) && isSameMonth(doc.createdAt))
+  documents.value.filter(
+    (doc) =>
+      !ESTADOS_ANULADOS.includes(doc.estado) &&
+      signoVenta(doc.tipoDte) !== 0 &&
+      isSameMonth(doc.fechaEmision ?? doc.createdAt)
+  )
 )
 
-const ventasDelMes = computed(() => documentosDelMes.value.reduce((sum, doc) => sum + doc.montos.total, 0))
-const ivaDelMes = computed(() => documentosDelMes.value.reduce((sum, doc) => sum + doc.montos.iva, 0))
+const ventasDelMes = computed(() =>
+  documentosDelMes.value.reduce((sum, doc) => sum + signoVenta(doc.tipoDte) * doc.montos.total, 0)
+)
+const ivaDelMes = computed(() =>
+  documentosDelMes.value.reduce((sum, doc) => sum + signoVenta(doc.tipoDte) * doc.montos.iva, 0)
+)
 
 const documentosPorCobrarList = computed(() =>
-  documents.value.filter((doc) => doc.montoPagado < doc.montos.total && ESTADOS_EMITIDOS.includes(doc.estado))
+  documents.value.filter(
+    (doc) =>
+      signoVenta(doc.tipoDte) !== 0 && doc.montoPagado < doc.montos.total && ESTADOS_EMITIDOS.includes(doc.estado)
+  )
 )
 const porCobrar = computed(() =>
-  documentosPorCobrarList.value.reduce((sum, doc) => sum + (doc.montos.total - doc.montoPagado), 0)
+  documentosPorCobrarList.value.reduce(
+    (sum, doc) => sum + signoVenta(doc.tipoDte) * (doc.montos.total - doc.montoPagado),
+    0
+  )
 )
 
 const comprasPorPagarList = computed(() => purchases.value.filter((purchase) => !purchase.pagado))
