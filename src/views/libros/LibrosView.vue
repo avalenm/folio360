@@ -10,17 +10,20 @@ import Message from 'primevue/message'
 import { useConfirm } from 'primevue/useconfirm'
 import { useToast } from 'primevue/usetoast'
 import { feathersClient } from '@/services/feathers'
-import type { LibroResumenTipo } from '@/types'
+import type { LibroResumenTipo, LibroResumenGuias } from '@/types'
 
 const toast = useToast()
 const confirm = useConfirm()
 
-const tipoOptions: { label: string; value: 'ventas' | 'compras' }[] = [
+type TipoLibro = 'ventas' | 'compras' | 'guias'
+
+const tipoOptions: { label: string; value: TipoLibro }[] = [
   { label: 'Libro de Ventas', value: 'ventas' },
-  { label: 'Libro de Compras', value: 'compras' }
+  { label: 'Libro de Compras', value: 'compras' },
+  { label: 'Libro de Guías', value: 'guias' }
 ]
 
-const tipo = ref<'ventas' | 'compras'>('ventas')
+const tipo = ref<TipoLibro>('ventas')
 const periodoDate = ref<Date>(new Date())
 
 // El servicio espera "AAAA-MM" (ver generate-libro.service.ts) — el
@@ -48,17 +51,50 @@ const resultado = ref<{
   filename: string
   xmlBase64: string
   resumen: LibroResumenTipo[]
+  resumenGuias?: LibroResumenGuias
   trackId?: string
 } | null>(null)
 const errorMsg = ref<string | null>(null)
 
-const totalDocumentos = computed(() => resultado.value?.resumen.reduce((sum, r) => sum + r.totDoc, 0) ?? 0)
-const totalGeneral = computed(() => resultado.value?.resumen.reduce((sum, r) => sum + r.totMntTotal, 0) ?? 0)
+// El Libro de Guías no agrupa por tipo de documento (todas sus líneas son
+// guías), así que trae su propio resumen y el conteo sale de ahí.
+const guias = computed(() => resultado.value?.resumenGuias)
+
+const totalDocumentos = computed(() => {
+  const g = guias.value
+  if (g) return g.totGuiaVenta + (g.totTraslado?.reduce((sum, t) => sum + t.cantGuia, 0) ?? 0)
+  return resultado.value?.resumen.reduce((sum, r) => sum + r.totDoc, 0) ?? 0
+})
+
+const totalGeneral = computed(() => {
+  const g = guias.value
+  if (g) return g.totMntGuiaVta + (g.totTraslado?.reduce((sum, t) => sum + (t.mntGuia ?? 0), 0) ?? 0)
+  return resultado.value?.resumen.reduce((sum, r) => sum + r.totMntTotal, 0) ?? 0
+})
+
+// Glosa de cada <TpoTraslado> del resumen (los que no son venta) — ver
+// server/src/sii/libro-guias.ts.
+const TRASLADO_LABELS: Record<number, string> = {
+  2: 'Ventas por efectuar',
+  3: 'Consignaciones',
+  4: 'Productos en demostración',
+  5: 'Traslados internos',
+  6: 'Otros traslados no venta',
+  7: 'Guías de devolución'
+}
+
+function trasladoLabel(tpo: number): string {
+  return TRASLADO_LABELS[tpo] ?? `Traslado tipo ${tpo}`
+}
 
 // El factor que terminó usando el libro — importa mostrarlo porque cuando el
 // campo se deja vacío lo calcula el server, y quien declara tiene que ver
 // con qué número quedó.
 const factorUsado = computed(() => resultado.value?.resumen.find((r) => r.fctProp !== undefined)?.fctProp)
+
+// El Libro de Guías solo existe pedido por notificación del SII, así que sin
+// folio no hay nada que generar (el server lo rechaza igual).
+const faltaFolioNotificacion = computed(() => tipo.value === 'guias' && folioNotificacion.value === null)
 
 function parametros(enviar: boolean) {
   return {
@@ -135,13 +171,19 @@ function descargar(): void {
 <template>
   <div>
     <div class="page-header">
-      <h1 class="page-title">Libros de Compra-Venta</h1>
+      <h1 class="page-title">Libros electrónicos</h1>
     </div>
 
     <p class="page-hint">
       Genera y firma la Información Electrónica de Compras y Ventas (IECV) del período seleccionado a partir de los
       documentos ya registrados. Primero se genera para revisar el resumen, y recién ahí se envía al SII: un libro
       enviado no se puede deshacer.
+    </p>
+
+    <p v-if="tipo === 'guias'" class="page-hint">
+      El Libro de Guías declara qué pasó con cada Guía de Despacho del período: cuáles se facturaron —su monto ya lo
+      declara la factura— y cuáles se anularon. Eso se marca en cada guía desde Documentos. Solo existe pedido por
+      notificación del SII, así que el folio de notificación es obligatorio.
     </p>
 
     <div class="filters surface-card">
@@ -155,7 +197,13 @@ function descargar(): void {
       </label>
       <label class="field">
         <span>Folio de notificación</span>
-        <InputNumber v-model="folioNotificacion" :min="1" :use-grouping="false" placeholder="Solo si el SII lo pidió" />
+        <InputNumber
+          v-model="folioNotificacion"
+          :min="1"
+          :use-grouping="false"
+          :invalid="faltaFolioNotificacion"
+          :placeholder="tipo === 'guias' ? 'Obligatorio' : 'Solo si el SII lo pidió'"
+        />
       </label>
       <label v-if="tipo === 'compras'" class="field">
         <span>Factor de proporcionalidad IVA</span>
@@ -168,7 +216,13 @@ function descargar(): void {
           placeholder="Se calcula solo"
         />
       </label>
-      <Button label="Generar" icon="pi pi-cog" :loading="generating" @click="generar" />
+      <Button
+        label="Generar"
+        icon="pi pi-cog"
+        :loading="generating"
+        :disabled="faltaFolioNotificacion"
+        @click="generar"
+      />
     </div>
 
     <Message v-if="errorMsg" severity="error" :closable="false">{{ errorMsg }}</Message>
@@ -195,7 +249,31 @@ function descargar(): void {
         </div>
       </div>
 
-      <DataTable :value="resultado.resumen" data-key="tipoDoc" size="small">
+      <div v-if="guias" class="resumen-guias">
+        <div class="dato">
+          <span class="dato-label">Guías de venta</span>
+          <span class="dato-valor">{{ guias.totGuiaVenta }} — ${{ guias.totMntGuiaVta.toLocaleString('es-CL') }}</span>
+        </div>
+        <div v-if="guias.totMntModificado" class="dato">
+          <span class="dato-label">Monto modificado</span>
+          <span class="dato-valor">${{ guias.totMntModificado.toLocaleString('es-CL') }}</span>
+          <span class="dato-hint">facturado o anulado en el período</span>
+        </div>
+        <div v-if="guias.totGuiaAnulada" class="dato">
+          <span class="dato-label">Guías anuladas</span>
+          <span class="dato-valor">{{ guias.totGuiaAnulada }}</span>
+        </div>
+        <div v-if="guias.totFolAnulado" class="dato">
+          <span class="dato-label">Folios anulados</span>
+          <span class="dato-valor">{{ guias.totFolAnulado }}</span>
+        </div>
+        <div v-for="t in guias.totTraslado" :key="t.tpoTraslado" class="dato">
+          <span class="dato-label">{{ trasladoLabel(t.tpoTraslado) }}</span>
+          <span class="dato-valor">{{ t.cantGuia }} — ${{ (t.mntGuia ?? 0).toLocaleString('es-CL') }}</span>
+        </div>
+      </div>
+
+      <DataTable v-else :value="resultado.resumen" data-key="tipoDoc" size="small">
         <Column field="tipoDoc" header="Tipo doc" />
         <Column field="totDoc" header="N° docs" />
         <Column header="Exento">
@@ -275,6 +353,35 @@ function descargar(): void {
 .result-actions {
   display: flex;
   gap: 0.5rem;
+}
+
+.resumen-guias {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.5rem 2.5rem;
+}
+
+.dato {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.dato-label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-secondary);
+}
+
+.dato-valor {
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+.dato-hint {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
 }
 
 .track-id {

@@ -166,6 +166,12 @@ export interface DteDocument {
   // el MOTIVO (venta, consignación, traslado interno...) — ver
   // document.model.ts en el server.
   tpoDespacho?: number
+  // Qué pasó con una Guía de Despacho (52) después de emitida: qué documento
+  // la facturó y si se anuló. Es lo que declara el Libro de Guías (ver
+  // document.model.ts en el servidor y LibrosView). Las fechas viajan como
+  // string en el JSON, igual que el resto.
+  guiaFacturada?: { tipoDte: number; folio: number; fecha: string }
+  guiaAnulada?: { fecha: string; motivo?: string }
   items: DteItem[]
   // Descuento global (%) sobre el subtotal de ítems afectos — ver
   // document.model.ts en el servidor.
@@ -216,6 +222,19 @@ export interface LibroResumenTipo {
   totCredIVAUsoComun?: number
   totIVANoRec?: { codIVANoRec: number; totOpIVANoRec: number; totMntIVANoRec: number }[]
   totOtrosImp?: { codImp: number; totMntImp: number }[]
+}
+
+// Resumen del Libro de Guías (ver server/src/sii/libro-guias.ts). No agrupa
+// por tipo de documento como el IECV —todas sus líneas son guías—, sino por
+// lo que pasó con cada una: cuántas se anularon y cuánto monto dejó de estar
+// vigente porque ya lo declaró una factura.
+export interface LibroResumenGuias {
+  totFolAnulado?: number
+  totGuiaAnulada?: number
+  totGuiaVenta: number
+  totMntGuiaVta: number
+  totMntModificado?: number
+  totTraslado?: { tpoTraslado: number; cantGuia: number; mntGuia?: number }[]
 }
 
 export type PurchaseTipoDocumento = 'factura' | 'boleta' | 'nota_credito' | 'nota_debito' | 'factura_compra'

@@ -653,6 +653,122 @@ async function eliminarPago(index: number): Promise<void> {
   }
 }
 
+// --- Qué pasó con una Guía de Despacho después de emitida ---
+// Una guía que constituye venta todavía no declaró la venta: la declarará la
+// factura que la reemplace. El Libro de Guías (LibrosView) es el que le
+// informa eso al SII, y para poder armarlo hay que registrar acá cuál se
+// facturó y cuál se anuló — ver document.model.ts en el servidor.
+const TIPO_DTE_GUIA_DESPACHO = 52
+
+// Estados en que la guía existe ante el SII y por lo tanto se puede facturar
+// o anular. Un borrador todavía no tiene folio: se elimina, no se anula.
+const ESTADOS_GUIA_VIGENTE = ['enviado', 'aceptado', 'reparo']
+
+function esGuiaVigente(document: DteDocument): boolean {
+  return (
+    document.tipoDte === TIPO_DTE_GUIA_DESPACHO &&
+    document.folio !== undefined &&
+    ESTADOS_GUIA_VIGENTE.includes(document.estado)
+  )
+}
+
+const guiaDocument = ref<DteDocument | null>(null)
+const guiaSending = ref(false)
+
+const facturadaVisible = ref(false)
+const facturadaDocId = ref<string>('')
+
+const anularVisible = ref(false)
+const anularFecha = ref<Date>(new Date())
+const anularMotivo = ref('')
+
+// Candidatos a "quién facturó esta guía": documentos emitidos que no son
+// guías. El <TpoDocRef> del Libro de Guías no admite el código 52 — una guía
+// no se reemplaza con otra guía, sino con una factura o una nota.
+const documentosQuePuedenFacturar = computed(() =>
+  documents.value
+    .filter(
+      (d) =>
+        d.tipoDte !== TIPO_DTE_GUIA_DESPACHO &&
+        d.folio !== undefined &&
+        ESTADOS_GUIA_VIGENTE.includes(d.estado)
+    )
+    .map((d) => ({
+      value: d._id,
+      label: `${tiposDte.find((t) => t.value === d.tipoDte)?.corto ?? d.tipoDte} N° ${d.folio} — $${formatMoney(
+        d.montos.total
+      )}`
+    }))
+)
+
+function openFacturada(document: DteDocument): void {
+  guiaDocument.value = document
+  facturadaDocId.value = ''
+  facturadaVisible.value = true
+}
+
+async function confirmFacturada(): Promise<void> {
+  const guia = guiaDocument.value
+  const factura = documents.value.find((d) => d._id === facturadaDocId.value)
+  if (!guia || !factura) return
+
+  guiaSending.value = true
+  try {
+    // Se guarda la tripleta tipo/folio/fecha, no el id: es exactamente lo que
+    // el Libro declara en <TpoDocRef>/<FolioDocRef>/<FchDocRef>.
+    await update(guia._id, {
+      guiaFacturada: {
+        tipoDte: factura.tipoDte,
+        folio: factura.folio as number,
+        fecha: factura.fechaEmision ?? factura.createdAt
+      }
+    })
+    facturadaVisible.value = false
+    toast.add({ severity: 'success', summary: 'Guía marcada como facturada', life: 2500 })
+  } catch (e) {
+    toast.add({
+      severity: 'error',
+      summary: 'Error al marcar la guía',
+      detail: e instanceof Error ? e.message : undefined,
+      life: 4000
+    })
+  } finally {
+    guiaSending.value = false
+  }
+}
+
+function openAnular(document: DteDocument): void {
+  guiaDocument.value = document
+  anularFecha.value = new Date()
+  anularMotivo.value = ''
+  anularVisible.value = true
+}
+
+async function confirmAnular(): Promise<void> {
+  const guia = guiaDocument.value
+  if (!guia) return
+
+  guiaSending.value = true
+  try {
+    // El estado 'anulado' lo pone el servidor junto con este campo: las dos
+    // cosas no se pueden separar (ver documents.service.ts).
+    await update(guia._id, {
+      guiaAnulada: { fecha: anularFecha.value.toISOString(), motivo: anularMotivo.value.trim() || undefined }
+    })
+    anularVisible.value = false
+    toast.add({ severity: 'success', summary: 'Guía anulada', life: 2500 })
+  } catch (e) {
+    toast.add({
+      severity: 'error',
+      summary: 'Error al anular la guía',
+      detail: e instanceof Error ? e.message : undefined,
+      life: 4000
+    })
+  } finally {
+    guiaSending.value = false
+  }
+}
+
 const previewVisible = ref(false)
 const previewDocument = ref<DteDocument | null>(null)
 const emitting = ref(false)
@@ -896,6 +1012,17 @@ const rowMenuItems = computed<MenuItem[]>(() => {
     })
   }
 
+  // Qué pasó con la guía después de emitida: es lo que declara el Libro de
+  // Guías, y sin esto los dos casos no se pueden registrar desde la UI.
+  // Contador+ por el mismo criterio que el resto: cambia lo que se le
+  // declara al SII.
+  if (esGuiaVigente(document) && auth.hasMinRole('contador')) {
+    if (!document.guiaFacturada) {
+      items.push({ label: 'Marcar como facturada', icon: 'pi pi-file-check', command: () => openFacturada(document) })
+    }
+    items.push({ label: 'Anular guía', icon: 'pi pi-ban', command: () => openAnular(document) })
+  }
+
   if (document.estado === 'draft') {
     items.push({ label: 'Eliminar', icon: 'pi pi-trash', command: () => confirmDelete(document) })
   }
@@ -1045,6 +1172,16 @@ onMounted(async () => {
       <Column header="Estado">
         <template #body="{ data }">
           <Tag :severity="estadoSeverity[data.estado]" :value="estadoLabel(data.estado)" :title="data.envioSiiGlosa" />
+          <!-- Una guía facturada sigue aceptada ante el SII, pero su monto ya
+               lo declara la factura: conviene verlo en el listado, porque es
+               lo que decide cómo entra al Libro de Guías. -->
+          <Tag
+            v-if="data.guiaFacturada"
+            severity="info"
+            :value="`Facturada ${data.guiaFacturada.folio}`"
+            :title="`Facturada por el documento tipo ${data.guiaFacturada.tipoDte} folio ${data.guiaFacturada.folio}`"
+            class="estado-extra"
+          />
         </template>
       </Column>
 
@@ -1417,6 +1554,59 @@ onMounted(async () => {
       </template>
     </Dialog>
 
+    <Dialog v-model:visible="facturadaVisible" modal header="Marcar la guía como facturada" style="width: 520px">
+      <p class="dialog-hint">
+        Una guía que constituye venta arrastra su monto hasta que se factura. Al indicar qué documento la facturó, el
+        Libro de Guías declara ese monto como modificado y el SII no cuenta la venta dos veces.
+      </p>
+
+      <label class="field">
+        <span>Documento que la facturó</span>
+        <Select
+          v-model="facturadaDocId"
+          :options="documentosQuePuedenFacturar"
+          option-label="label"
+          option-value="value"
+          placeholder="Elige la factura o nota"
+          filter
+        />
+      </label>
+
+      <template #footer>
+        <Button label="Cancelar" text @click="facturadaVisible = false" />
+        <Button
+          label="Marcar como facturada"
+          icon="pi pi-file-check"
+          :disabled="!facturadaDocId"
+          :loading="guiaSending"
+          @click="confirmFacturada"
+        />
+      </template>
+    </Dialog>
+
+    <Dialog v-model:visible="anularVisible" modal header="Anular la guía" style="width: 520px">
+      <p class="dialog-hint">
+        La guía queda anulada y su monto deja de estar vigente. Si ya se envió al SII, el Libro de Guías lo declara como
+        anulación posterior al envío. No se puede deshacer.
+      </p>
+
+      <div class="anular-form">
+        <label class="field">
+          <span>Fecha de anulación</span>
+          <DatePicker v-model="anularFecha" date-format="dd/mm/yy" />
+        </label>
+        <label class="field anular-motivo">
+          <span>Motivo</span>
+          <InputText v-model="anularMotivo" placeholder="Opcional — queda en el registro interno" />
+        </label>
+      </div>
+
+      <template #footer>
+        <Button label="Cancelar" text @click="anularVisible = false" />
+        <Button label="Anular guía" icon="pi pi-ban" severity="danger" :loading="guiaSending" @click="confirmAnular" />
+      </template>
+    </Dialog>
+
     <Dialog v-model:visible="previewVisible" modal header="Vista previa" style="width: 640px">
       <FacturaPreview
         v-if="previewDocument"
@@ -1663,6 +1853,27 @@ onMounted(async () => {
   margin: 0;
   font-size: 0.85rem;
   color: #475569;
+}
+
+.estado-extra {
+  margin-left: 0.35rem;
+}
+
+.dialog-hint {
+  margin: 0 0 1rem;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.anular-form {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.anular-motivo {
+  flex: 1;
+  min-width: 14rem;
 }
 
 .form-actions {
