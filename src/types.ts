@@ -60,6 +60,11 @@ export interface Customer {
   ciudad?: string
   email?: string
   condicionPago?: string
+  // Receptor extranjero (documentos de exportación): RUT genérico
+  // 55555555-5 y estos datos en la zona <Extranjero> del DTE — ver
+  // customer.model.ts en el servidor. `nacionalidad` es el código de PAÍS
+  // de Aduana (Anexo 51-9), ver codigosAduana.ts.
+  extranjero?: { numId?: string; nacionalidad?: number }
   createdAt: string
   updatedAt: string
 }
@@ -134,6 +139,11 @@ export interface DteItem {
   // Liquidación-Factura (43).
   montoLinea?: number
   tipoDocLiq?: number
+  // Descuento/recargo porcentual de la línea — solo exportación, donde los
+  // montos llevan decimales y el % es la única forma válida en el XSD de
+  // justificarlos (ver document.model.ts en el servidor).
+  descuentoPct?: number
+  recargoPct?: number
 }
 
 // Una línea de "Comisiones y Otros Cargos": lo que cobra el mandatario en
@@ -170,6 +180,45 @@ export interface DteReferencia {
   razon: string
 }
 
+// Zona de exportación del documento (110/111/112): moneda de la operación,
+// forma de pago y los datos de aduana del Encabezado. Espejo de
+// DteExportacion en document.model.ts del servidor; los códigos vienen de
+// codigosAduana.ts.
+export interface DteExportacion {
+  moneda: string
+  indServicio?: number
+  fmaPagExp?: number
+  modalidadVenta?: number
+  clausulaVenta?: number
+  totalClausula?: number
+  viaTransporte?: number
+  puertoEmbarque?: number
+  puertoDesembarque?: number
+  tara?: number
+  unidadTara?: number
+  pesoBruto?: number
+  unidadPesoBruto?: number
+  pesoNeto?: number
+  unidadPesoNeto?: number
+  totalItems?: number
+  totalBultos?: number
+  tipoBultos?: number
+  flete?: number
+  seguro?: number
+  paisRecep?: number
+  paisDestino?: number
+}
+
+// Una línea de descuento/recargo global — exportación la usa para el flete
+// y el seguro (dos recargos, exige el SII) y las comisiones al exterior.
+export interface DteDscRcgGlobal {
+  tpoMov: 'D' | 'R'
+  glosa?: string
+  tpoValor: '%' | '$'
+  valor: number
+  indExeDR?: number
+}
+
 export interface DteDocument {
   _id: string
   tipoDte: number
@@ -197,6 +246,11 @@ export interface DteDocument {
   // Descuento global (%) sobre el subtotal de ítems afectos — ver
   // document.model.ts en el servidor.
   descuentoGlobalPct?: number
+  // Solo exportación (110/111/112) — ver DteExportacion.
+  exportacion?: DteExportacion
+  // Líneas de descuento/recargo global; coexiste con descuentoGlobalPct
+  // (un documento usa una cosa o la otra) — ver document.model.ts.
+  dscRcgGlobales?: DteDscRcgGlobal[]
   montos: DteMontos
   referencias: DteReferencia[]
   estado: DocumentEstado

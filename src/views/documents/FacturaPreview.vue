@@ -10,8 +10,14 @@ const props = defineProps<{
   organization: Organization | undefined
 }>()
 
+// Exportación (110/111/112): montos en moneda extranjera CON decimales; el
+// resto va en pesos enteros — ver document.model.ts en el servidor.
+const esExportacion = computed(() => [110, 111, 112].includes(props.document.tipoDte))
+
 function formatMoney(value: number): string {
-  return value.toLocaleString('es-CL')
+  return esExportacion.value
+    ? value.toLocaleString('es-CL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    : value.toLocaleString('es-CL')
 }
 
 const fechaEmision = computed(() => {
@@ -22,17 +28,23 @@ const fechaEmision = computed(() => {
 const itemRows = computed(() =>
   props.document.items.map((item) => ({
     ...item,
-    montoItem: Math.round(item.cantidad * item.precioUnit - (item.descuento ?? 0))
+    montoItem: esExportacion.value
+      ? Math.round(item.cantidad * item.precioUnit * (1 - (item.descuentoPct ?? 0) / 100) * (1 + (item.recargoPct ?? 0) / 100) * 100) / 100
+      : Math.round(item.cantidad * item.precioUnit - (item.descuento ?? 0))
   }))
 )
 
 const tipoDteLabel: Record<number, string> = {
   33: 'FACTURA ELECTRÓNICA',
   34: 'FACTURA NO AFECTA O EXENTA ELECTRÓNICA',
+  43: 'LIQUIDACIÓN-FACTURA ELECTRÓNICA',
   46: 'FACTURA DE COMPRA ELECTRÓNICA',
   52: 'GUÍA DE DESPACHO ELECTRÓNICA',
   56: 'NOTA DE DÉBITO ELECTRÓNICA',
-  61: 'NOTA DE CRÉDITO ELECTRÓNICA'
+  61: 'NOTA DE CRÉDITO ELECTRÓNICA',
+  110: 'FACTURA DE EXPORTACIÓN ELECTRÓNICA',
+  111: 'NOTA DE DÉBITO DE EXPORTACIÓN ELECTRÓNICA',
+  112: 'NOTA DE CRÉDITO DE EXPORTACIÓN ELECTRÓNICA'
 }
 </script>
 
@@ -97,6 +109,18 @@ const tipoDteLabel: Record<number, string> = {
         <template v-if="document.tipoDte === 34">
           <div class="totales-row"><span>Monto Exento</span><span>${{ formatMoney(document.montos.total) }}</span></div>
         </template>
+        <!-- Exportación: sin Neto ni IVA (todo exento), montos con decimales
+        en la moneda de la operación, con los recargos globales (flete,
+        seguro, comisiones) desglosados — igual que el XML. -->
+        <template v-else-if="esExportacion">
+          <div v-for="(linea, index) in document.dscRcgGlobales ?? []" :key="index" class="totales-row">
+            <span>{{ linea.tpoMov === 'R' ? 'Recargo' : 'Descuento' }} {{ linea.glosa }}</span>
+            <span>{{ linea.tpoMov === 'R' ? '+' : '−' }}{{ linea.tpoValor === '%' ? `${linea.valor}%` : formatMoney(linea.valor) }}</span>
+          </div>
+          <div class="totales-row">
+            <span>Monto Exento</span><span>{{ formatMoney(document.montos.exento) }}</span>
+          </div>
+        </template>
         <template v-else>
           <div class="totales-row"><span>Monto Neto</span><span>${{ formatMoney(document.montos.neto) }}</span></div>
           <div v-if="document.montos.exento > 0" class="totales-row">
@@ -104,7 +128,11 @@ const tipoDteLabel: Record<number, string> = {
           </div>
           <div class="totales-row"><span>I.V.A. (19%)</span><span>${{ formatMoney(document.montos.iva) }}</span></div>
         </template>
-        <div class="totales-row totales-total"><span>Total</span><span>${{ formatMoney(document.montos.total) }}</span></div>
+        <div class="totales-row totales-total">
+          <span>Total</span>
+          <span v-if="esExportacion">{{ formatMoney(document.montos.total) }} {{ document.exportacion?.moneda }}</span>
+          <span v-else>${{ formatMoney(document.montos.total) }}</span>
+        </div>
       </div>
     </div>
   </div>

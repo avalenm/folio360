@@ -18,8 +18,20 @@ import { useResource } from '@/composables/useResource'
 import { useAuthStore } from '@/stores/auth'
 import { feathersClient } from '@/services/feathers'
 import FacturaPreview from './FacturaPreview.vue'
-import type { Customer, DteDocument, DteItem, DtePago, Product, Supplier, ValorUf } from '@/types'
+import type { Customer, DteDocument, DteExportacion, DteItem, DtePago, Product, Supplier, ValorUf } from '@/types'
 import { TIPOS_DTE_EMITIBLES, nombreCortoTipoDte, tipoDteCorto, tipoDteLabel } from '@/tiposDte'
+import {
+  CLAUSULAS_VENTA,
+  FORMAS_PAGO_EXPORTACION,
+  INDICADORES_SERVICIO_EXPORTACION,
+  MODALIDADES_VENTA,
+  MONEDAS_EXPORTACION,
+  PAISES,
+  PUERTOS,
+  TIPOS_BULTO,
+  UNIDADES_ADUANA,
+  VIAS_TRANSPORTE
+} from '@/codigosAduana'
 
 const { items: documents, loading, fetchAll, create, update, remove } = useResource<DteDocument>('documents')
 const { items: customers, fetchAll: fetchCustomers } = useResource<Customer>('customers')
@@ -35,11 +47,34 @@ const ambientes = [
 ]
 
 
-const TIPOS_DTE_REQUIEREN_REFERENCIA = [56, 61]
+// Las notas de crédito/débito normales (61/56) y las de exportación
+// (112/111) siempre corrigen o anulan un documento anterior.
+const TIPOS_DTE_REQUIEREN_REFERENCIA = [56, 61, 111, 112]
 const TIPOS_DTE_REQUIEREN_TRASLADO = [52]
 // El <Receptor> del DTE lleva los datos del PROVEEDOR, no de un cliente —
 // ver document.model.ts en el servidor.
 const TIPOS_DTE_COMPRA = [46]
+
+// Exportación (110/111/112): todo exento, montos en moneda extranjera CON
+// decimales, receptor extranjero y zona de aduana — ver document.model.ts
+// en el servidor y codigosAduana.ts para las tablas.
+const TIPOS_DTE_EXPORTACION = [110, 111, 112]
+
+// Documentos de aduana que una exportación referencia (tabla "Tipo
+// Documento Referencia" del Formato DTE del SII, códigos 801-815). No son
+// DTE del sistema: folio y fecha se escriben a mano.
+const REFERENCIAS_ADUANA = [
+  { label: 'DUS (807)', value: 807 },
+  { label: 'B/L — Conocimiento de embarque (808)', value: 808 },
+  { label: 'AWB — Air Way Bill (809)', value: 809 },
+  { label: 'MIC/DTA (810)', value: 810 },
+  { label: 'Carta de Porte (811)', value: 811 },
+  { label: 'Resolución SNA que califica el servicio (812)', value: 812 },
+  { label: 'Pasaporte (813)', value: 813 },
+  { label: 'Orden de compra (801)', value: 801 },
+  { label: 'Contrato (803)', value: 803 },
+  { label: 'Resolución (804)', value: 804 }
+]
 
 // Liquidación-Factura: cada línea resume un conjunto de documentos, así que
 // lleva el monto directo (no cantidad × precio) y el código del documento
@@ -234,10 +269,55 @@ interface ItemDraft extends DteItem {
   key: number
 }
 
+// Una línea de recargo/descuento global (exportación): el flete y el seguro
+// van como dos recargos separados —lo exige el SII— más las comisiones al
+// exterior. El <IndExeDR>1 (opera sobre exentos) lo pone handleSave: en
+// exportación todo es exento, no es una decisión del usuario.
+interface DscRcgDraft {
+  key: number
+  tpoMov: 'D' | 'R'
+  glosa: string
+  tpoValor: '%' | '$'
+  valor: number
+}
+
+let dscRcgKeySeq = 0
+
+function blankDscRcg(): DscRcgDraft {
+  dscRcgKeySeq += 1
+  return { key: dscRcgKeySeq, tpoMov: 'R', glosa: '', tpoValor: '$', valor: 0 }
+}
+
+// Una referencia a un documento de aduana (DUS, AWB, MIC...): no es un DTE
+// del sistema, así que folio y fecha se escriben a mano.
+interface ReferenciaAduanaDraft {
+  key: number
+  tipoDteRef: number
+  folioRef: number
+  fecha: Date
+  razon: string
+}
+
+let refAduanaKeySeq = 0
+
+function blankReferenciaAduana(): ReferenciaAduanaDraft {
+  refAduanaKeySeq += 1
+  return { key: refAduanaKeySeq, tipoDteRef: 807, folioRef: 0, fecha: new Date(), razon: '' }
+}
+
 let itemKeySeq = 0
+
+// Exportación: el monto de la línea va con dos decimales y aplica los
+// porcentuales — mismo cálculo (en centésimas) que el servidor en montos.ts.
+function montoItemExportacion(item: ItemDraft): number {
+  const bruto = item.cantidad * item.precioUnit
+  const conDescuento = bruto * (1 - (item.descuentoPct ?? 0) / 100)
+  return Math.round(conDescuento * (1 + (item.recargoPct ?? 0) / 100) * 100) / 100
+}
 
 function montoItem(item: ItemDraft): number {
   if (sinMontos.value) return 0
+  if (esExportacion.value) return montoItemExportacion(item)
   if (item.montoLinea !== undefined) return item.montoLinea
   return Math.round(item.cantidad * item.precioUnit - (item.descuento ?? 0))
 }
@@ -311,6 +391,34 @@ async function applyProduct(item: ItemDraft, productId: string | null): Promise<
   item.precioUnit = product.precio
 }
 
+// La zona de exportación del borrador, con todos sus campos en blanco. Los
+// null son "sin dato": handleSave arma el objeto final solo con lo lleno.
+function blankExportacion() {
+  return {
+    moneda: 'DOLAR USA',
+    indServicio: null as number | null,
+    fmaPagExp: null as number | null,
+    modalidadVenta: null as number | null,
+    clausulaVenta: null as number | null,
+    totalClausula: null as number | null,
+    viaTransporte: null as number | null,
+    puertoEmbarque: null as number | null,
+    puertoDesembarque: null as number | null,
+    tara: null as number | null,
+    unidadTara: null as number | null,
+    pesoBruto: null as number | null,
+    unidadPesoBruto: null as number | null,
+    pesoNeto: null as number | null,
+    unidadPesoNeto: null as number | null,
+    totalBultos: null as number | null,
+    tipoBultos: null as number | null,
+    flete: null as number | null,
+    seguro: null as number | null,
+    paisRecep: null as number | null,
+    paisDestino: null as number | null
+  }
+}
+
 const draft = reactive({
   tipoDte: 33,
   ambiente: 'certificacion' as 'certificacion' | 'produccion',
@@ -324,17 +432,23 @@ const draft = reactive({
   tpoDespacho: null as number | null,
   descuentoGlobalPct: 0,
   items: [blankItem()] as ItemDraft[],
-  comisiones: [] as ComisionDraft[]
+  comisiones: [] as ComisionDraft[],
+  exportacion: blankExportacion(),
+  dscRcgGlobales: [] as DscRcgDraft[],
+  referenciasAduana: [] as ReferenciaAduanaDraft[]
 })
 
-// Una Factura No Afecta o Exenta (34) solo puede tener ítems exentos (ver
+const esExportacion = computed(() => TIPOS_DTE_EXPORTACION.includes(draft.tipoDte))
+
+// Una Factura No Afecta o Exenta (34) y los documentos de exportación
+// (110/111/112, que no llevan IVA) solo pueden tener ítems exentos (ver
 // documents.service.ts) — se fuerza acá para que el usuario nunca llegue a
 // chocar con ese rechazo del servidor; el switch "Exento" de cada ítem se
-// deshabilita para este tipo en el template.
+// deshabilita para estos tipos en el template.
 watch(
   () => draft.tipoDte,
   (tipoDte) => {
-    if (tipoDte === 34) {
+    if (tipoDte === 34 || TIPOS_DTE_EXPORTACION.includes(tipoDte)) {
       draft.items.forEach((item) => {
         item.exento = true
       })
@@ -423,6 +537,19 @@ const montosPreview = computed(() => {
     return { netoBruto: 0, descuentoGlobal: 0, neto: 0, exento: 0, iva: 0, comision: 0, total: 0 }
   }
 
+  // Exportación: todo exento, con decimales, y los recargos/descuentos
+  // globales suman/restan directo — mismo criterio que el servidor
+  // (calcularMontosExportacion en montos.ts), trabajando en centésimas.
+  if (esExportacion.value) {
+    const itemsCent = draft.items.reduce((sum, item) => sum + Math.round(montoItemExportacion(item) * 100), 0)
+    let exentoCent = itemsCent
+    for (const linea of draft.dscRcgGlobales) {
+      const montoCent = linea.tpoValor === '%' ? Math.round((itemsCent * linea.valor) / 100) : Math.round(linea.valor * 100)
+      exentoCent += linea.tpoMov === 'R' ? montoCent : -montoCent
+    }
+    return { netoBruto: 0, descuentoGlobal: 0, neto: 0, exento: exentoCent / 100, iva: 0, comision: 0, total: exentoCent / 100 }
+  }
+
   let netoBruto = 0
   let exento = 0
 
@@ -456,6 +583,9 @@ function openCreate(): void {
   draft.descuentoGlobalPct = 0
   draft.items = [blankItem()]
   draft.comisiones = []
+  draft.exportacion = blankExportacion()
+  draft.dscRcgGlobales = []
+  draft.referenciasAduana = []
   dialogVisible.value = true
 }
 
@@ -477,15 +607,56 @@ function openEdit(document: DteDocument): void {
   draft.descuentoGlobalPct = document.descuentoGlobalPct ?? 0
   draft.items = document.items.map((item) => ({ ...item, key: (itemKeySeq += 1) }))
   draft.comisiones = (document.comisiones ?? []).map((c) => ({ ...c, key: (comisionKeySeq += 1) }))
+  draft.exportacion = { ...blankExportacion(), ...(document.exportacion ?? {}) }
+  draft.dscRcgGlobales = (document.dscRcgGlobales ?? []).map((linea) => ({
+    ...linea,
+    glosa: linea.glosa ?? '',
+    key: (dscRcgKeySeq += 1)
+  }))
+  // Las referencias a documentos de aduana usan los códigos 801-815 del SII
+  // — todo lo demás (un tipoDte real) es la referencia NC/ND de más arriba.
+  draft.referenciasAduana = (document.referencias ?? [])
+    .filter((referencia) => typeof referencia.tipoDteRef === 'number' && referencia.tipoDteRef >= 800)
+    .map((referencia) => ({
+      key: (refAduanaKeySeq += 1),
+      tipoDteRef: referencia.tipoDteRef,
+      folioRef: referencia.folioRef,
+      fecha: new Date(referencia.fechaRef),
+      razon: referencia.razon
+    }))
   dialogVisible.value = true
 }
 
 function addItem(): void {
-  draft.items.push(blankItem(draft.tipoDte === 34))
+  draft.items.push(blankItem(draft.tipoDte === 34 || esExportacion.value))
 }
 
 function removeItem(key: number): void {
   draft.items = draft.items.filter((item) => item.key !== key)
+}
+
+function addDscRcg(): void {
+  draft.dscRcgGlobales.push(blankDscRcg())
+}
+
+function removeDscRcg(key: number): void {
+  draft.dscRcgGlobales = draft.dscRcgGlobales.filter((linea) => linea.key !== key)
+}
+
+function addReferenciaAduana(): void {
+  draft.referenciasAduana.push(blankReferenciaAduana())
+}
+
+function removeReferenciaAduana(key: number): void {
+  draft.referenciasAduana = draft.referenciasAduana.filter((referencia) => referencia.key !== key)
+}
+
+// El objeto `exportacion` que se manda al servidor: solo los campos con
+// dato (los null del formulario no viajan) — el servidor guarda lo que
+// llega y el XML omite lo ausente.
+function exportacionPayload(): DteExportacion {
+  const entries = Object.entries(draft.exportacion).filter(([, value]) => value !== null && value !== '')
+  return Object.fromEntries(entries) as unknown as DteExportacion
 }
 
 async function handleSave(): Promise<void> {
@@ -515,14 +686,39 @@ async function handleSave(): Promise<void> {
     }
   }
 
+  if (!editingId.value && esExportacion.value && !draft.exportacion.moneda) {
+    toast.add({ severity: 'warn', summary: 'Falta la moneda de la operación', life: 3000 })
+    return
+  }
+
   saving.value = true
   try {
-    const items = draft.items.map(({ key: _key, ...item }) => item)
+    const items = draft.items.map(({ key: _key, ...item }) => ({
+      ...item,
+      // Los porcentuales solo viajan con dato: un 0 guardado sería un
+      // descuento/recargo declarado en el XML.
+      descuentoPct: item.descuentoPct || undefined,
+      recargoPct: item.recargoPct || undefined
+    }))
+    // <IndExeDR>1: en exportación todo es exento, así que cada recargo o
+    // descuento global opera sobre los montos exentos — no es una decisión
+    // del usuario, se fija acá (ver dte-xml.ts en el servidor).
+    const dscRcgGlobales = esExportacion.value
+      ? draft.dscRcgGlobales
+          .filter((linea) => linea.valor > 0)
+          .map(({ key: _key, glosa, ...linea }) => ({ ...linea, glosa: glosa.trim() || undefined, indExeDR: 1 }))
+      : []
+
     if (editingId.value) {
-      await update(editingId.value, { items })
+      await update(
+        editingId.value,
+        esExportacion.value
+          ? { items, exportacion: exportacionPayload(), dscRcgGlobales }
+          : { items }
+      )
     } else {
       const doc = referenciaDoc.value
-      const referencias =
+      const referencias: Array<{ tipoDteRef: number; folioRef: number; fechaRef: string; codRef?: number; razon: string }> =
         TIPOS_DTE_REQUIEREN_REFERENCIA.includes(draft.tipoDte) && doc
           ? [
               {
@@ -534,6 +730,20 @@ async function handleSave(): Promise<void> {
               }
             ]
           : []
+
+      // Las referencias a documentos de aduana (DUS, AWB, MIC...) van
+      // después de la referencia NC/ND si la hay.
+      if (esExportacion.value) {
+        for (const referencia of draft.referenciasAduana) {
+          if (!referencia.folioRef && !referencia.razon.trim()) continue
+          referencias.push({
+            tipoDteRef: referencia.tipoDteRef,
+            folioRef: referencia.folioRef,
+            fechaRef: referencia.fecha.toISOString(),
+            razon: referencia.razon.trim()
+          })
+        }
+      }
 
       await create({
         tipoDte: draft.tipoDte,
@@ -547,6 +757,8 @@ async function handleSave(): Promise<void> {
             ? draft.tpoDespacho
             : undefined,
         descuentoGlobalPct: draft.tipoDte !== 34 && draft.descuentoGlobalPct ? draft.descuentoGlobalPct : undefined,
+        exportacion: esExportacion.value ? exportacionPayload() : undefined,
+        dscRcgGlobales: esExportacion.value && dscRcgGlobales.length > 0 ? dscRcgGlobales : undefined,
         referencias,
         items,
         comisiones: esLiquidacion.value
@@ -1319,6 +1531,304 @@ onMounted(async () => {
           </p>
         </section>
 
+        <section v-if="esExportacion" class="doc-section">
+          <h3 class="section-title">Exportación</h3>
+          <p class="giro-hint">
+            <i class="pi pi-info-circle" /> Los montos van en la moneda de la operación, con decimales. El cliente
+            debe tener el RUT genérico de extranjeros (55555555-5) y su país en la ficha. Los campos de aduana que
+            no apliquen se dejan vacíos.
+          </p>
+          <div class="form-row">
+            <label class="field">
+              <span>Moneda de la operación</span>
+              <Select v-model="draft.exportacion.moneda" :options="MONEDAS_EXPORTACION" filter :disabled="!!editingId" />
+            </label>
+            <label class="field">
+              <span>Forma de pago exportación</span>
+              <Select
+                v-model="draft.exportacion.fmaPagExp"
+                :options="FORMAS_PAGO_EXPORTACION"
+                option-label="label"
+                option-value="value"
+                placeholder="Sin especificar"
+                show-clear
+              />
+            </label>
+            <label class="field">
+              <span>Indicador de servicio</span>
+              <Select
+                v-model="draft.exportacion.indServicio"
+                :options="INDICADORES_SERVICIO_EXPORTACION"
+                option-label="label"
+                option-value="value"
+                placeholder="No es un servicio"
+                show-clear
+              />
+            </label>
+          </div>
+          <div class="form-row">
+            <label class="field">
+              <span>Modalidad de venta</span>
+              <Select
+                v-model="draft.exportacion.modalidadVenta"
+                :options="MODALIDADES_VENTA"
+                option-label="label"
+                option-value="value"
+                placeholder="Sin especificar"
+                show-clear
+              />
+            </label>
+            <label class="field">
+              <span>Cláusula de venta</span>
+              <Select
+                v-model="draft.exportacion.clausulaVenta"
+                :options="CLAUSULAS_VENTA"
+                option-label="label"
+                option-value="value"
+                placeholder="Sin especificar"
+                show-clear
+              />
+            </label>
+            <label class="field">
+              <span>Total cláusula de venta</span>
+              <InputNumber v-model="draft.exportacion.totalClausula" :min="0" mode="decimal" :max-fraction-digits="2" fluid />
+            </label>
+          </div>
+          <div class="form-row">
+            <label class="field">
+              <span>Vía de transporte</span>
+              <Select
+                v-model="draft.exportacion.viaTransporte"
+                :options="VIAS_TRANSPORTE"
+                option-label="label"
+                option-value="value"
+                placeholder="Sin especificar"
+                show-clear
+              />
+            </label>
+            <label class="field">
+              <span>Puerto de embarque</span>
+              <Select
+                v-model="draft.exportacion.puertoEmbarque"
+                :options="PUERTOS"
+                option-label="label"
+                option-value="value"
+                placeholder="Sin especificar"
+                filter
+                show-clear
+              />
+            </label>
+            <label class="field">
+              <span>Puerto de desembarque</span>
+              <Select
+                v-model="draft.exportacion.puertoDesembarque"
+                :options="PUERTOS"
+                option-label="label"
+                option-value="value"
+                placeholder="Sin especificar"
+                filter
+                show-clear
+              />
+            </label>
+          </div>
+          <div class="form-row">
+            <label class="field">
+              <span>País receptor</span>
+              <Select
+                v-model="draft.exportacion.paisRecep"
+                :options="PAISES"
+                option-label="label"
+                option-value="value"
+                placeholder="Sin especificar"
+                filter
+                show-clear
+              />
+            </label>
+            <label class="field">
+              <span>País de destino</span>
+              <Select
+                v-model="draft.exportacion.paisDestino"
+                :options="PAISES"
+                option-label="label"
+                option-value="value"
+                placeholder="Sin especificar"
+                filter
+                show-clear
+              />
+            </label>
+            <label class="field">
+              <span>Tipo de bulto</span>
+              <Select
+                v-model="draft.exportacion.tipoBultos"
+                :options="TIPOS_BULTO"
+                option-label="label"
+                option-value="value"
+                placeholder="Sin especificar"
+                filter
+                show-clear
+              />
+            </label>
+          </div>
+          <div class="form-row">
+            <label class="field">
+              <span>Total de bultos</span>
+              <InputNumber v-model="draft.exportacion.totalBultos" :min="0" fluid />
+            </label>
+            <label class="field">
+              <span>Flete</span>
+              <InputNumber v-model="draft.exportacion.flete" :min="0" mode="decimal" :max-fraction-digits="2" fluid />
+            </label>
+            <label class="field">
+              <span>Seguro</span>
+              <InputNumber v-model="draft.exportacion.seguro" :min="0" mode="decimal" :max-fraction-digits="2" fluid />
+            </label>
+          </div>
+          <div class="form-row">
+            <label class="field">
+              <span>Tara</span>
+              <InputNumber v-model="draft.exportacion.tara" :min="0" fluid />
+            </label>
+            <label class="field">
+              <span>Unidad de la tara</span>
+              <Select
+                v-model="draft.exportacion.unidadTara"
+                :options="UNIDADES_ADUANA"
+                option-label="label"
+                option-value="value"
+                placeholder="Sin especificar"
+                show-clear
+              />
+            </label>
+            <label class="field">
+              <span>Peso bruto</span>
+              <InputNumber v-model="draft.exportacion.pesoBruto" :min="0" mode="decimal" :max-fraction-digits="2" fluid />
+            </label>
+          </div>
+          <div class="form-row">
+            <label class="field">
+              <span>Unidad peso bruto</span>
+              <Select
+                v-model="draft.exportacion.unidadPesoBruto"
+                :options="UNIDADES_ADUANA"
+                option-label="label"
+                option-value="value"
+                placeholder="Sin especificar"
+                show-clear
+              />
+            </label>
+            <label class="field">
+              <span>Peso neto</span>
+              <InputNumber v-model="draft.exportacion.pesoNeto" :min="0" mode="decimal" :max-fraction-digits="2" fluid />
+            </label>
+            <label class="field">
+              <span>Unidad peso neto</span>
+              <Select
+                v-model="draft.exportacion.unidadPesoNeto"
+                :options="UNIDADES_ADUANA"
+                option-label="label"
+                option-value="value"
+                placeholder="Sin especificar"
+                show-clear
+              />
+            </label>
+          </div>
+
+          <div class="section-header-row" style="margin-top: 0.75rem">
+            <h3 class="section-title">Recargos y descuentos globales</h3>
+            <Button label="Agregar línea" icon="pi pi-plus" text size="small" type="button" @click="addDscRcg" />
+          </div>
+          <p class="giro-hint">
+            <i class="pi pi-info-circle" /> El flete y el seguro del encabezado deben declararse ADEMÁS acá, como
+            dos recargos separados en monto — lo exige el SII para exportación.
+          </p>
+          <div v-for="linea in draft.dscRcgGlobales" :key="linea.key" class="form-row dscrcg-row">
+            <label class="field">
+              <span>Tipo</span>
+              <Select
+                v-model="linea.tpoMov"
+                :options="[
+                  { label: 'Recargo', value: 'R' },
+                  { label: 'Descuento', value: 'D' }
+                ]"
+                option-label="label"
+                option-value="value"
+              />
+            </label>
+            <label class="field field-grow">
+              <span>Glosa</span>
+              <InputText v-model="linea.glosa" placeholder="Ej: FLETE" :maxlength="45" />
+            </label>
+            <label class="field">
+              <span>En</span>
+              <Select
+                v-model="linea.tpoValor"
+                :options="[
+                  { label: 'Monto', value: '$' },
+                  { label: 'Porcentaje', value: '%' }
+                ]"
+                option-label="label"
+                option-value="value"
+              />
+            </label>
+            <label class="field">
+              <span>Valor</span>
+              <InputNumber v-model="linea.valor" :min="0" mode="decimal" :max-fraction-digits="2" fluid />
+            </label>
+            <Button
+              icon="pi pi-times"
+              text
+              severity="secondary"
+              type="button"
+              title="Quitar línea"
+              class="dscrcg-remove"
+              @click="removeDscRcg(linea.key)"
+            />
+          </div>
+
+          <div class="section-header-row" style="margin-top: 0.75rem">
+            <h3 class="section-title">Referencias de aduana</h3>
+            <Button label="Agregar referencia" icon="pi pi-plus" text size="small" type="button" :disabled="!!editingId" @click="addReferenciaAduana" />
+          </div>
+          <p class="giro-hint">
+            <i class="pi pi-info-circle" /> Documentos de la operación de exportación: DUS, conocimiento de
+            embarque (B/L), guía aérea (AWB), MIC/DTA o la resolución del SNA que califica el servicio.
+          </p>
+          <div v-for="referencia in draft.referenciasAduana" :key="referencia.key" class="form-row dscrcg-row">
+            <label class="field field-grow">
+              <span>Documento</span>
+              <Select
+                v-model="referencia.tipoDteRef"
+                :options="REFERENCIAS_ADUANA"
+                option-label="label"
+                option-value="value"
+                :disabled="!!editingId"
+              />
+            </label>
+            <label class="field">
+              <span>Folio / número</span>
+              <InputNumber v-model="referencia.folioRef" :min="0" :use-grouping="false" fluid :disabled="!!editingId" />
+            </label>
+            <label class="field">
+              <span>Fecha</span>
+              <DatePicker v-model="referencia.fecha" date-format="dd/mm/yy" :disabled="!!editingId" />
+            </label>
+            <label class="field">
+              <span>Razón</span>
+              <InputText v-model="referencia.razon" placeholder="Ej: DUS" :maxlength="90" :disabled="!!editingId" />
+            </label>
+            <Button
+              icon="pi pi-times"
+              text
+              severity="secondary"
+              type="button"
+              title="Quitar referencia"
+              class="dscrcg-remove"
+              :disabled="!!editingId"
+              @click="removeReferenciaAduana(referencia.key)"
+            />
+          </div>
+        </section>
+
         <section v-if="TIPOS_DTE_REQUIEREN_REFERENCIA.includes(draft.tipoDte)" class="doc-section">
           <h3 class="section-title">Documento que corrige o anula</h3>
           <div class="form-row">
@@ -1393,20 +1903,24 @@ onMounted(async () => {
           </p>
 
           <div class="items-card">
-            <div class="items-head" :class="{ 'items-liquidacion': esLiquidacion }">
+            <div class="items-head" :class="{ 'items-liquidacion': esLiquidacion, 'items-exportacion': esExportacion }">
               <span class="col-producto">Producto</span>
               <span class="col-descripcion">Descripción</span>
               <span v-if="esLiquidacion" class="col-num">Documento</span>
               <span class="col-num">Cantidad</span>
               <span v-if="!esLiquidacion" class="col-unidad">Unidad</span>
               <span v-if="!esLiquidacion" class="col-num">Precio unit.</span>
-              <span class="col-num">{{ esLiquidacion ? 'Total línea' : 'Descuento' }}</span>
+              <template v-if="esExportacion">
+                <span class="col-num">Dcto. %</span>
+                <span class="col-num">Recargo %</span>
+              </template>
+              <span v-else class="col-num">{{ esLiquidacion ? 'Total línea' : 'Descuento' }}</span>
               <span class="col-exento">Exento</span>
               <span class="col-total">Total</span>
               <span class="col-remove"></span>
             </div>
 
-            <div v-for="item in draft.items" :key="item.key" class="item-row" :class="{ 'items-liquidacion': esLiquidacion }">
+            <div v-for="item in draft.items" :key="item.key" class="item-row" :class="{ 'items-liquidacion': esLiquidacion, 'items-exportacion': esExportacion }">
               <div class="col-producto">
                 <Select
                   :model-value="item.productId ?? null"
@@ -1439,9 +1953,27 @@ onMounted(async () => {
                 <InputText v-model="item.unidad" :maxlength="4" placeholder="Un" fluid />
               </div>
               <div v-if="!esLiquidacion" class="col-num">
-                <InputNumber v-model="item.precioUnit" :min="0" mode="decimal" fluid :disabled="sinMontos" />
+                <InputNumber
+                  v-model="item.precioUnit"
+                  :min="0"
+                  mode="decimal"
+                  :max-fraction-digits="esExportacion ? 4 : undefined"
+                  fluid
+                  :disabled="sinMontos"
+                />
               </div>
-              <div class="col-num">
+              <template v-if="esExportacion">
+                <!-- Exportación: los montos llevan decimales y el XSD solo
+                     admite el descuento/recargo de línea como PORCENTAJE —
+                     ver document.model.ts en el servidor. -->
+                <div class="col-num">
+                  <InputNumber v-model="item.descuentoPct" :min="0" :max="100" mode="decimal" :max-fraction-digits="2" suffix="%" fluid />
+                </div>
+                <div class="col-num">
+                  <InputNumber v-model="item.recargoPct" :min="0" mode="decimal" :max-fraction-digits="2" suffix="%" fluid />
+                </div>
+              </template>
+              <div v-else class="col-num">
                 <!-- En una liquidación la línea resume documentos: el monto
                      viene dado (y puede ser negativo si es una nota de
                      crédito), no se calcula como cantidad × precio. -->
@@ -1449,7 +1981,7 @@ onMounted(async () => {
                 <InputNumber v-else v-model="item.descuento" :min="0" mode="decimal" fluid :disabled="sinMontos" />
               </div>
               <div class="col-exento">
-                <ToggleSwitch v-model="item.exento" :disabled="draft.tipoDte === 34" />
+                <ToggleSwitch v-model="item.exento" :disabled="draft.tipoDte === 34 || esExportacion" />
               </div>
               <div class="col-total">${{ montoItem(item).toLocaleString('es-CL') }}</div>
               <div class="col-remove">
@@ -1470,7 +2002,7 @@ onMounted(async () => {
             convierten a pesos al agregarlos.
           </p>
 
-          <label v-if="draft.tipoDte !== 34" class="field" style="max-width: 260px; margin-top: 0.75rem">
+          <label v-if="draft.tipoDte !== 34 && !esExportacion" class="field" style="max-width: 260px; margin-top: 0.75rem">
             <span>Descuento global ítems afectos (%)</span>
             <InputNumber
               v-model="draft.descuentoGlobalPct"
@@ -1494,12 +2026,18 @@ onMounted(async () => {
             <span>Dscto. global ({{ draft.descuentoGlobalPct }}%)</span>
             <span>-${{ montosPreview.descuentoGlobal.toLocaleString('es-CL') }}</span>
           </div>
-          <div class="totals-row"><span>Neto</span><span>${{ montosPreview.neto.toLocaleString('es-CL') }}</span></div>
+          <div v-if="!esExportacion" class="totals-row"><span>Neto</span><span>${{ montosPreview.neto.toLocaleString('es-CL') }}</span></div>
           <div v-if="montosPreview.exento > 0" class="totals-row">
-            <span>Exento</span><span>${{ montosPreview.exento.toLocaleString('es-CL') }}</span>
+            <span>Exento</span>
+            <span v-if="esExportacion">{{ montosPreview.exento.toLocaleString('es-CL', { minimumFractionDigits: 2 }) }} {{ draft.exportacion.moneda }}</span>
+            <span v-else>${{ montosPreview.exento.toLocaleString('es-CL') }}</span>
           </div>
-          <div class="totals-row"><span>IVA (19%)</span><span>${{ montosPreview.iva.toLocaleString('es-CL') }}</span></div>
-          <div class="totals-row totals-total"><span>Total</span><span>${{ montosPreview.total.toLocaleString('es-CL') }}</span></div>
+          <div v-if="!esExportacion" class="totals-row"><span>IVA (19%)</span><span>${{ montosPreview.iva.toLocaleString('es-CL') }}</span></div>
+          <div class="totals-row totals-total">
+            <span>Total</span>
+            <span v-if="esExportacion">{{ montosPreview.total.toLocaleString('es-CL', { minimumFractionDigits: 2 }) }} {{ draft.exportacion.moneda }}</span>
+            <span v-else>${{ montosPreview.total.toLocaleString('es-CL') }}</span>
+          </div>
         </div>
 
         <div class="form-actions">
@@ -2034,6 +2572,23 @@ onMounted(async () => {
 .items-head.items-liquidacion,
 .item-row.items-liquidacion {
   grid-template-columns: 1.1fr 1.6fr 11rem 5rem 8rem 4rem 7rem 2.25rem;
+}
+
+/* Exportación: en lugar del descuento en monto van dos columnas de
+   porcentaje (descuento y recargo de línea). */
+.items-head.items-exportacion,
+.item-row.items-exportacion {
+  grid-template-columns: 1.1fr 1.5fr 4.5rem 3.5rem 6rem 5rem 5rem 4rem 6.5rem 2.25rem;
+}
+
+/* Fila de recargo/descuento global o de referencia de aduana: los campos en
+   línea con su botón de quitar al final, alineado con los inputs. */
+.dscrcg-row {
+  align-items: end;
+}
+
+.dscrcg-remove {
+  margin-bottom: 0.15rem;
 }
 
 .comisiones-head,

@@ -4,11 +4,11 @@
 // los CAF de exportación se veían como "Tipo 110" sin descripción.
 //
 // `emitible` separa lo que el sistema sabe generar de lo que solo sabe
-// nombrar: un CAF de exportación se puede cargar y mostrar, pero todavía no
-// hay cómo emitir el documento (falta la zona de aduana, la moneda
-// extranjera y las tablas de códigos — ver certificacion/
-// exportacion-y-liquidacion.md). Ofrecerlo en el selector de emisión sería
-// prometer algo que no funciona.
+// nombrar: ofrecer en el selector de emisión un tipo que el backend no
+// soporta sería prometer algo que no funciona. Hoy todos los tipos listados
+// son emitibles (exportación se sumó el 2026-08-12 con la zona de aduana,
+// la moneda extranjera y las tablas de códigos — ver codigosAduana.ts),
+// pero la distinción queda para el próximo tipo que aparezca.
 export interface TipoDte {
   value: number
   // Nombre completo, como lo llama el SII.
@@ -27,9 +27,9 @@ export const TIPOS_DTE: TipoDte[] = [
   { value: 52, label: 'Guía de Despacho Electrónica', corto: 'Guía de despacho', emitible: true },
   { value: 56, label: 'Nota de Débito Electrónica', corto: 'Nota de débito', emitible: true },
   { value: 61, label: 'Nota de Crédito Electrónica', corto: 'Nota de crédito', emitible: true },
-  { value: 110, label: 'Factura de Exportación Electrónica', corto: 'Factura de exportación', emitible: false },
-  { value: 111, label: 'Nota de Débito de Exportación Electrónica', corto: 'Nota de débito exportación', emitible: false },
-  { value: 112, label: 'Nota de Crédito de Exportación Electrónica', corto: 'Nota de crédito exportación', emitible: false }
+  { value: 110, label: 'Factura de Exportación Electrónica', corto: 'Factura de exportación', emitible: true },
+  { value: 111, label: 'Nota de Débito de Exportación Electrónica', corto: 'Nota de débito exportación', emitible: true },
+  { value: 112, label: 'Nota de Crédito de Exportación Electrónica', corto: 'Nota de crédito exportación', emitible: true }
 ]
 
 export const TIPOS_DTE_EMITIBLES = TIPOS_DTE.filter((tipo) => tipo.emitible)

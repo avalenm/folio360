@@ -6,12 +6,19 @@ import Button from 'primevue/button'
 import Dialog from 'primevue/dialog'
 import InputText from 'primevue/inputtext'
 import Menu from 'primevue/menu'
+import Select from 'primevue/select'
+import ToggleSwitch from 'primevue/toggleswitch'
 import type { MenuItem } from 'primevue/menuitem'
 import { useConfirm } from 'primevue/useconfirm'
 import { useToast } from 'primevue/usetoast'
 import { useResource } from '@/composables/useResource'
 import { feathersClient } from '@/services/feathers'
+import { PAISES } from '@/codigosAduana'
 import type { Customer, SituacionTributaria } from '@/types'
+
+// RUT genérico que el SII asigna a receptores extranjeros — el que llevan
+// los documentos de exportación (110/111/112).
+const RUT_EXTRANJERO = '55555555-5'
 
 const { items, loading, fetchAll, create, update, remove } = useResource<Customer>('customers')
 const confirm = useConfirm()
@@ -107,25 +114,55 @@ function emptyDraft(): Partial<Customer> {
 
 const draft = reactive<Partial<Customer>>(emptyDraft())
 
+// Receptor extranjero (documentos de exportación): la zona <Extranjero> del
+// DTE lleva su identificador nacional y su país (código de Aduana), y el
+// RUT del cliente pasa a ser el genérico 55555555-5 — ver customer.model.ts
+// en el servidor.
+const esExtranjero = ref(false)
+const extranjeroNumId = ref('')
+const extranjeroNacionalidad = ref<number | null>(null)
+
+// Al marcar extranjero se propone el RUT genérico (si no hay otro escrito);
+// la búsqueda por RUT en el SII no aplica para extranjeros.
+function onToggleExtranjero(value: boolean): void {
+  if (value && !draft.rut) draft.rut = RUT_EXTRANJERO
+}
+
 function openCreate(): void {
   editingId.value = null
   Object.assign(draft, emptyDraft())
+  esExtranjero.value = false
+  extranjeroNumId.value = ''
+  extranjeroNacionalidad.value = null
   dialogVisible.value = true
 }
 
 function openEdit(customer: Customer): void {
   editingId.value = customer._id
   Object.assign(draft, customer)
+  esExtranjero.value = !!customer.extranjero
+  extranjeroNumId.value = customer.extranjero?.numId ?? ''
+  extranjeroNacionalidad.value = customer.extranjero?.nacionalidad ?? null
   dialogVisible.value = true
 }
 
 async function handleSave(): Promise<void> {
   saving.value = true
   try {
+    // `null` borra la zona al des-marcar extranjero en una edición (un
+    // patch ignora las claves undefined, así que undefined no bastaría).
+    const extranjero = esExtranjero.value
+      ? {
+          numId: extranjeroNumId.value.trim() || undefined,
+          nacionalidad: extranjeroNacionalidad.value ?? undefined
+        }
+      : null
+    const payload = { ...draft, extranjero: extranjero as Customer['extranjero'] }
+
     if (editingId.value) {
-      await update(editingId.value, draft)
+      await update(editingId.value, payload)
     } else {
-      await create(draft)
+      await create(payload)
     }
     dialogVisible.value = false
     toast.add({ severity: 'success', summary: 'Guardado', life: 2500 })
@@ -268,6 +305,33 @@ onMounted(fetchAll)
           <InputText v-model="draft.condicionPago" />
         </label>
 
+        <label class="field field-switch">
+          <span>Cliente extranjero (para facturas de exportación)</span>
+          <ToggleSwitch v-model="esExtranjero" @update:model-value="onToggleExtranjero" />
+        </label>
+        <template v-if="esExtranjero">
+          <p class="extranjero-hint">
+            El RUT debe ser el genérico de extranjeros ({{ RUT_EXTRANJERO }}); el identificador y el país van en
+            la zona Extranjero del documento.
+          </p>
+          <label class="field">
+            <span>Identificador en su país (tax ID, pasaporte...)</span>
+            <InputText v-model="extranjeroNumId" :maxlength="20" />
+          </label>
+          <label class="field">
+            <span>País (nacionalidad)</span>
+            <Select
+              v-model="extranjeroNacionalidad"
+              :options="PAISES"
+              option-label="label"
+              option-value="value"
+              placeholder="Selecciona el país"
+              filter
+              show-clear
+            />
+          </label>
+        </template>
+
         <div class="form-actions">
           <Button label="Cancelar" text @click="dialogVisible = false" />
           <Button type="submit" label="Guardar" :loading="saving" />
@@ -356,5 +420,19 @@ onMounted(fetchAll)
   justify-content: flex-end;
   gap: 0.5rem;
   margin-top: 0.5rem;
+}
+
+.field-switch {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.extranjero-hint {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 400;
+  color: var(--text-secondary);
 }
 </style>
