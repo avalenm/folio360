@@ -39,12 +39,12 @@ const ambientes = [
 // "facturacion-sii-signing") — se deja como lista para que agregar otro
 // tipo el día de mañana sea solo sumar una opción.
 const tiposDte = [
-  { label: 'Factura Electrónica (33)', value: 33 },
-  { label: 'Factura No Afecta o Exenta Electrónica (34)', value: 34 },
-  { label: 'Guía de Despacho Electrónica (52)', value: 52 },
-  { label: 'Factura de Compra Electrónica (46)', value: 46 },
-  { label: 'Nota de Crédito Electrónica (61)', value: 61 },
-  { label: 'Nota de Débito Electrónica (56)', value: 56 }
+  { label: 'Factura Electrónica (33)', corto: 'Factura', value: 33 },
+  { label: 'Factura No Afecta o Exenta Electrónica (34)', corto: 'Factura exenta', value: 34 },
+  { label: 'Guía de Despacho Electrónica (52)', corto: 'Guía de despacho', value: 52 },
+  { label: 'Factura de Compra Electrónica (46)', corto: 'Factura de compra', value: 46 },
+  { label: 'Nota de Crédito Electrónica (61)', corto: 'Nota de crédito', value: 61 },
+  { label: 'Nota de Débito Electrónica (56)', corto: 'Nota de débito', value: 56 }
 ]
 
 const TIPOS_DTE_REQUIEREN_REFERENCIA = [56, 61]
@@ -60,6 +60,13 @@ const MAX_DETALLE_LINES = 60
 
 function tipoDteLabel(tipoDte: number): string {
   return tiposDte.find((t) => t.value === tipoDte)?.label ?? `Tipo ${tipoDte}`
+}
+
+// Para la tabla: el nombre sin el "Electrónica" que se repite en todos, pero
+// conservando el código, que es como el SII los identifica.
+function tipoDteCorto(tipoDte: number): string {
+  const tipo = tiposDte.find((t) => t.value === tipoDte)
+  return tipo ? `${tipo.corto} (${tipo.value})` : `Tipo ${tipoDte}`
 }
 
 const CODIGOS_REFERENCIA = [
@@ -123,12 +130,17 @@ function saldoOf(document: DteDocument): number {
 // --- Filtros (client-side: el volumen de esta app no justifica paginación
 // server-side todavía) ---
 const filterFolio = ref('')
+const filterTipo = ref<number | null>(null)
 const filterCliente = ref('')
 const filterFechas = ref<Date[] | null>(null)
 
 const filteredDocuments = computed(() =>
   documents.value.filter((document) => {
     if (filterFolio.value && !String(document.folio ?? '').includes(filterFolio.value.trim())) {
+      return false
+    }
+
+    if (filterTipo.value !== null && document.tipoDte !== filterTipo.value) {
       return false
     }
 
@@ -153,6 +165,7 @@ const filteredDocuments = computed(() =>
 
 function limpiarFiltros(): void {
   filterFolio.value = ''
+  filterTipo.value = null
   filterCliente.value = ''
   filterFechas.value = null
 }
@@ -929,6 +942,17 @@ onMounted(async () => {
         <InputText v-model="filterFolio" placeholder="N° folio" />
       </label>
       <label class="field">
+        <span>Tipo de documento</span>
+        <Select
+          v-model="filterTipo"
+          :options="tiposDte"
+          option-label="corto"
+          option-value="value"
+          placeholder="Todos"
+          show-clear
+        />
+      </label>
+      <label class="field">
         <span>Cliente/proveedor o RUT</span>
         <InputText v-model="filterCliente" placeholder="Nombre o RUT" />
       </label>
@@ -974,7 +998,7 @@ onMounted(async () => {
         <template #body="{ data }">
           <div class="stacked-cell">
             <strong>{{ data.folio ?? '—' }}</strong>
-            <span class="muted">Tipo {{ data.tipoDte }}</span>
+            <span class="muted">{{ tipoDteCorto(data.tipoDte) }}</span>
           </div>
         </template>
       </Column>
