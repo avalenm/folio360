@@ -307,12 +307,20 @@ function blankReferenciaAduana(): ReferenciaAduanaDraft {
 
 let itemKeySeq = 0
 
-// Exportación: el monto de la línea va con dos decimales y aplica los
-// porcentuales — mismo cálculo (en centésimas) que el servidor en montos.ts.
+// Exportación: mismo cálculo que el servidor (montos.ts). El monto de un
+// porcentual se aplica ENTERO cuando alcanza 1 —el XML lo declara entero y
+// el SII exige que la línea calce exacto con lo declarado— y exacto con
+// decimales cuando es menor (no se declara y la tolerancia lo cubre).
+function montoPorcentualExp(base: number, pct: number | undefined): number {
+  const exacto = Math.round(base * (pct ?? 0)) / 100
+  return exacto >= 1 ? Math.round(exacto) : exacto
+}
+
 function montoItemExportacion(item: ItemDraft): number {
   const bruto = item.cantidad * item.precioUnit
-  const conDescuento = bruto * (1 - (item.descuentoPct ?? 0) / 100)
-  return Math.round(conDescuento * (1 + (item.recargoPct ?? 0) / 100) * 100) / 100
+  const descuento = montoPorcentualExp(bruto, item.descuentoPct)
+  const recargo = montoPorcentualExp(bruto - descuento, item.recargoPct)
+  return Math.round((bruto - descuento + recargo) * 100) / 100
 }
 
 function montoItem(item: ItemDraft): number {

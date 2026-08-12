@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { Customer, DteDocument, Organization, Supplier } from '@/types'
+import type { Customer, DteDocument, DteItem, Organization, Supplier } from '@/types'
 
 const props = defineProps<{
   document: DteDocument
@@ -25,11 +25,25 @@ const fechaEmision = computed(() => {
   return new Date(raw).toLocaleDateString('es-CL')
 })
 
+// El monto de un porcentual de exportación se aplica entero cuando alcanza
+// 1 y exacto cuando es menor — mismo criterio que el servidor (montos.ts).
+function montoPorcentualExp(base: number, pct: number | undefined): number {
+  const exacto = Math.round(base * (pct ?? 0)) / 100
+  return exacto >= 1 ? Math.round(exacto) : exacto
+}
+
+function montoItemExp(item: DteItem): number {
+  const bruto = item.cantidad * item.precioUnit
+  const descuento = montoPorcentualExp(bruto, item.descuentoPct)
+  const recargo = montoPorcentualExp(bruto - descuento, item.recargoPct)
+  return Math.round((bruto - descuento + recargo) * 100) / 100
+}
+
 const itemRows = computed(() =>
   props.document.items.map((item) => ({
     ...item,
     montoItem: esExportacion.value
-      ? Math.round(item.cantidad * item.precioUnit * (1 - (item.descuentoPct ?? 0) / 100) * (1 + (item.recargoPct ?? 0) / 100) * 100) / 100
+      ? montoItemExp(item)
       : Math.round(item.cantidad * item.precioUnit - (item.descuento ?? 0))
   }))
 )
