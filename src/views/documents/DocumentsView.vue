@@ -1393,7 +1393,7 @@ onMounted(async () => {
           </p>
 
           <div class="items-card">
-            <div class="items-head">
+            <div class="items-head" :class="{ 'items-liquidacion': esLiquidacion }">
               <span class="col-producto">Producto</span>
               <span class="col-descripcion">Descripción</span>
               <span v-if="esLiquidacion" class="col-num">Documento</span>
@@ -1406,7 +1406,7 @@ onMounted(async () => {
               <span class="col-remove"></span>
             </div>
 
-            <div v-for="item in draft.items" :key="item.key" class="item-row">
+            <div v-for="item in draft.items" :key="item.key" class="item-row" :class="{ 'items-liquidacion': esLiquidacion }">
               <div class="col-producto">
                 <Select
                   :model-value="item.productId ?? null"
@@ -2027,6 +2027,13 @@ onMounted(async () => {
 .item-row > * {
   min-width: 0;
   overflow: hidden;
+}
+
+/* La liquidación cambia las columnas: aparece el documento que se liquida y
+   el total de la línea, y desaparecen unidad, precio y descuento. */
+.items-head.items-liquidacion,
+.item-row.items-liquidacion {
+  grid-template-columns: 1.1fr 1.6fr 11rem 5rem 8rem 4rem 7rem 2.25rem;
 }
 
 .comisiones-head,
