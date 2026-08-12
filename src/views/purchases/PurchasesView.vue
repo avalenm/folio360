@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Button from 'primevue/button'
@@ -16,7 +16,14 @@ import { useConfirm } from 'primevue/useconfirm'
 import { useToast } from 'primevue/usetoast'
 import { useResource } from '@/composables/useResource'
 import { feathersClient } from '@/services/feathers'
-import type { Purchase, PurchaseAccionSii, PurchaseTipoDocumento, Supplier } from '@/types'
+import type {
+  Purchase,
+  PurchaseAccionSii,
+  PurchaseCodigoIvaNoRec,
+  PurchaseTipoDocumento,
+  PurchaseWrite,
+  Supplier
+} from '@/types'
 
 const { items: purchases, loading, fetchAll, create, update, remove } = useResource<Purchase>('purchases')
 const { items: suppliers, fetchAll: fetchSuppliers } = useResource<Supplier>('suppliers')
@@ -140,9 +147,46 @@ const dialogVisible = ref(false)
 const editingId = ref<string | null>(null)
 const saving = ref(false)
 
+// El IVA de una compra puede recibir cuatro tratamientos distintos, y cada
+// uno viaja en un campo distinto del Libro de Compras. Se elige el
+// tratamiento —no el campo— porque cuál corresponde depende de para qué se
+// usó la compra, que es lo que el usuario sí sabe.
+type TratamientoIva = 'credito' | 'uso_comun' | 'sin_credito' | 'retenido'
+
+const tratamientosIva: { label: string; value: TratamientoIva; hint: string }[] = [
+  { label: 'Con derecho a crédito', value: 'credito', hint: 'El caso normal: el IVA se descuenta como crédito fiscal.' },
+  {
+    label: 'Uso común (ventas afectas y exentas)',
+    value: 'uso_comun',
+    hint: 'Cuánto se puede usar como crédito se define al cerrar el período, con el factor de proporcionalidad.'
+  },
+  {
+    label: 'Sin derecho a crédito',
+    value: 'sin_credito',
+    hint: 'El IVA se pagó pero no se puede descontar. Hay que indicar el motivo.'
+  },
+  {
+    label: 'Retenido totalmente (cambio de sujeto)',
+    value: 'retenido',
+    hint: 'Solo en facturas de compra: el IVA se retiene y no se le paga al proveedor.'
+  }
+]
+
+// Códigos de la tabla <IVANoRec> del Formato IECV.
+const motivosSinCredito: { label: string; value: PurchaseCodigoIvaNoRec }[] = [
+  { label: 'Compras para operaciones no gravadas o exentas', value: 1 },
+  { label: 'Factura registrada fuera de plazo', value: 2 },
+  { label: 'Gastos rechazados', value: 3 },
+  { label: 'Entrega gratuita recibida (premio, bonificación)', value: 4 },
+  { label: 'Otros', value: 9 }
+]
+
+const TASA_IVA = 0.19
+
 interface PurchaseDraft {
   supplierId: string
   tipoDocumento: PurchaseTipoDocumento
+  electronico: boolean
   folio: string
   fecha: Date
   fechaVencimiento: Date | null
@@ -150,25 +194,94 @@ interface PurchaseDraft {
   montoNeto: number
   montoIva: number
   montoExento: number
+  tratamientoIva: TratamientoIva
+  motivoSinCredito: PurchaseCodigoIvaNoRec
+  referenciaId: string | null
 }
 
 function emptyDraft(): PurchaseDraft {
   return {
     supplierId: '',
     tipoDocumento: 'factura',
+    electronico: true,
     folio: '',
     fecha: new Date(),
     fechaVencimiento: null,
     glosa: '',
     montoNeto: 0,
     montoIva: 0,
-    montoExento: 0
+    montoExento: 0,
+    tratamientoIva: 'credito',
+    motivoSinCredito: 4,
+    referenciaId: null
   }
 }
 
 const draft = reactive<PurchaseDraft>(emptyDraft())
 
-const montoTotalPreview = computed(() => draft.montoNeto + draft.montoIva + draft.montoExento)
+// El IVA se recalcula al cambiar el neto, pero queda editable: los montos
+// del documento los fija el proveedor y a veces difieren en un peso por
+// redondeo. Lo que se declara tiene que calzar con el papel, no con la
+// fórmula.
+function recalcularIva(): void {
+  draft.montoIva = Math.round(draft.montoNeto * TASA_IVA)
+}
+
+const requiereReferencia = computed(
+  () => draft.tipoDocumento === 'nota_credito' || draft.tipoDocumento === 'nota_debito'
+)
+
+// Solo una factura de compra puede llevar retención (lo valida también el
+// server); si se cambia el tipo, el tratamiento vuelve al normal.
+const tratamientosDisponibles = computed(() =>
+  tratamientosIva.filter((t) => t.value !== 'retenido' || draft.tipoDocumento === 'factura_compra')
+)
+
+const tratamientoHint = computed(
+  () => tratamientosIva.find((t) => t.value === draft.tratamientoIva)?.hint ?? ''
+)
+
+// Si se cambia el tipo a uno que no admite retención, el tratamiento tiene
+// que volver atrás: si no, el formulario mostraría una opción ya filtrada y
+// el server rechazaría el guardado.
+watch(
+  () => draft.tipoDocumento,
+  (tipo) => {
+    if (tipo !== 'factura_compra' && draft.tratamientoIva === 'retenido') {
+      draft.tratamientoIva = 'credito'
+    }
+    if (tipo !== 'nota_credito' && tipo !== 'nota_debito') {
+      draft.referenciaId = null
+    }
+  }
+)
+
+// Documentos del mismo proveedor a los que puede apuntar una nota de
+// crédito/débito. Elegir de acá evita tipear folio y tipo a mano, y de paso
+// deja bien el código SII del documento referido, que depende de si era
+// electrónico.
+const referenciaOptions = computed(() =>
+  purchases.value
+    .filter(
+      (p) =>
+        p.supplierId === draft.supplierId &&
+        p._id !== editingId.value &&
+        (p.tipoDocumento === 'factura' || p.tipoDocumento === 'factura_compra')
+    )
+    .map((p) => ({
+      label: `${tipoDocumentoLabel[p.tipoDocumento]} ${p.folio} — $${p.montoTotal.toLocaleString('es-CL')}`,
+      value: p._id
+    }))
+)
+
+// Misma fórmula que computeMontoTotal en purchases.service.ts: todo el IVA
+// que se pagó suma, y el retenido resta porque no se le paga al proveedor.
+const montoTotalPreview = computed(() => {
+  const base = draft.montoNeto + draft.montoExento
+
+  if (draft.tratamientoIva === 'retenido') return base
+  return base + draft.montoIva
+})
 
 function openCreate(): void {
   editingId.value = null
@@ -176,18 +289,41 @@ function openCreate(): void {
   dialogVisible.value = true
 }
 
+// El tratamiento no se guarda como tal: se deduce de cuál de los campos de
+// IVA trae la compra, que es la forma en que lo entiende el SII.
+function tratamientoDe(purchase: Purchase): TratamientoIva {
+  if (purchase.ivaRetenidoTotal) return 'retenido'
+  if (purchase.ivaUsoComun) return 'uso_comun'
+  if (purchase.ivaNoRecuperable) return 'sin_credito'
+  return 'credito'
+}
+
+function montoIvaDe(purchase: Purchase): number {
+  return purchase.montoIva || purchase.ivaUsoComun || purchase.ivaNoRecuperable?.monto || 0
+}
+
 function openEdit(purchase: Purchase): void {
   editingId.value = purchase._id
   Object.assign(draft, {
     supplierId: purchase.supplierId,
     tipoDocumento: purchase.tipoDocumento,
+    electronico: purchase.electronico !== false,
     folio: purchase.folio,
     fecha: new Date(purchase.fecha),
     fechaVencimiento: purchase.fechaVencimiento ? new Date(purchase.fechaVencimiento) : null,
     glosa: purchase.glosa ?? '',
     montoNeto: purchase.montoNeto,
-    montoIva: purchase.montoIva,
-    montoExento: purchase.montoExento
+    montoIva: montoIvaDe(purchase),
+    montoExento: purchase.montoExento,
+    tratamientoIva: tratamientoDe(purchase),
+    motivoSinCredito: purchase.ivaNoRecuperable?.codigo ?? 4,
+    referenciaId:
+      purchases.value.find(
+        (p) =>
+          p.supplierId === purchase.supplierId &&
+          p.folio === purchase.referencia?.folio &&
+          p.tipoDocumento === purchase.referencia?.tipoDocumento
+      )?._id ?? null
   })
   dialogVisible.value = true
 }
@@ -195,22 +331,49 @@ function openEdit(purchase: Purchase): void {
 async function handleSave(): Promise<void> {
   saving.value = true
   try {
-    const payload = {
+    // El monto de IVA del formulario se reparte al campo que le corresponde
+    // según el tratamiento. Los que no aplican van en 0 o en null —nunca
+    // omitidos—: al editar se manda un patch, y una clave ausente deja el
+    // valor anterior, así que cambiar de tratamiento arrastraría el campo
+    // viejo y el documento quedaría declarando dos IVA distintos.
+    const retenido = draft.tratamientoIva === 'retenido'
+    const referida = purchases.value.find((p) => p._id === draft.referenciaId)
+
+    const payload: PurchaseWrite = {
       supplierId: draft.supplierId,
       tipoDocumento: draft.tipoDocumento,
+      electronico: draft.electronico,
       folio: draft.folio,
       fecha: draft.fecha.toISOString(),
       fechaVencimiento: draft.fechaVencimiento ? draft.fechaVencimiento.toISOString() : undefined,
       glosa: draft.glosa || undefined,
       montoNeto: draft.montoNeto,
-      montoIva: draft.montoIva,
-      montoExento: draft.montoExento
+      montoExento: draft.montoExento,
+      // Con retención el IVA sigue siendo recuperable: se retiene, no se
+      // pierde (ver purchase.model.ts).
+      montoIva: draft.tratamientoIva === 'credito' || retenido ? draft.montoIva : 0,
+      ivaUsoComun: draft.tratamientoIva === 'uso_comun' ? draft.montoIva : 0,
+      ivaNoRecuperable:
+        draft.tratamientoIva === 'sin_credito'
+          ? { codigo: draft.motivoSinCredito, monto: draft.montoIva }
+          : null,
+      ivaRetenidoTotal: retenido ? draft.montoIva : 0,
+      referencia:
+        requiereReferencia.value && referida
+          ? {
+              tipoDocumento: referida.tipoDocumento,
+              folio: referida.folio,
+              electronico: referida.electronico !== false
+            }
+          : null
     }
 
+    // useResource está tipado sobre el documento guardado, que no admite
+    // null; el cast es justamente por los campos que se borran.
     if (editingId.value) {
-      await update(editingId.value, payload)
+      await update(editingId.value, payload as Partial<Purchase>)
     } else {
-      await create(payload)
+      await create(payload as Partial<Purchase>)
     }
     dialogVisible.value = false
     toast.add({ severity: 'success', summary: 'Guardado', life: 2500 })
@@ -454,7 +617,14 @@ onMounted(async () => {
             <span>Folio</span>
             <InputText v-model="draft.folio" required />
           </label>
+          <label class="field field-switch">
+            <span>Electrónico</span>
+            <ToggleSwitch v-model="draft.electronico" />
+          </label>
         </div>
+        <small class="field-hint">
+          Un documento en papel se declara en el Libro de Compras con otro código que uno electrónico.
+        </small>
 
         <label class="field">
           <span>Proveedor</span>
@@ -472,6 +642,19 @@ onMounted(async () => {
           </label>
         </div>
 
+        <label v-if="requiereReferencia" class="field">
+          <span>Documento que corrige</span>
+          <Select
+            v-model="draft.referenciaId"
+            :options="referenciaOptions"
+            option-label="label"
+            option-value="value"
+            :placeholder="draft.supplierId ? 'Selecciona el documento' : 'Elige primero el proveedor'"
+            :disabled="!draft.supplierId"
+            show-clear
+          />
+        </label>
+
         <label class="field">
           <span>Glosa</span>
           <InputText v-model="draft.glosa" />
@@ -480,7 +663,7 @@ onMounted(async () => {
         <div class="form-row">
           <label class="field">
             <span>Monto neto</span>
-            <InputNumber v-model="draft.montoNeto" :min="0" />
+            <InputNumber v-model="draft.montoNeto" :min="0" @update:model-value="recalcularIva" />
           </label>
           <label class="field">
             <span>IVA</span>
@@ -491,6 +674,27 @@ onMounted(async () => {
             <InputNumber v-model="draft.montoExento" :min="0" />
           </label>
         </div>
+
+        <label class="field">
+          <span>Tratamiento del IVA</span>
+          <Select
+            v-model="draft.tratamientoIva"
+            :options="tratamientosDisponibles"
+            option-label="label"
+            option-value="value"
+          />
+        </label>
+        <small class="field-hint">{{ tratamientoHint }}</small>
+
+        <label v-if="draft.tratamientoIva === 'sin_credito'" class="field">
+          <span>Motivo</span>
+          <Select
+            v-model="draft.motivoSinCredito"
+            :options="motivosSinCredito"
+            option-label="label"
+            option-value="value"
+          />
+        </label>
 
         <div class="total-preview">Total: {{ montoTotalPreview.toLocaleString('es-CL') }}</div>
 
@@ -575,6 +779,19 @@ onMounted(async () => {
 .field-grow {
   flex: 1;
   min-width: 220px;
+}
+
+/* El switch no crece como los inputs: se queda del ancho de su etiqueta. */
+.field-switch {
+  flex: 0 0 auto;
+  justify-content: space-between;
+}
+
+.field-hint {
+  margin-top: -0.5rem;
+  font-size: 0.78rem;
+  font-weight: 400;
+  color: var(--text-secondary);
 }
 
 .stacked-cell {

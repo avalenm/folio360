@@ -4,13 +4,16 @@ import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Button from 'primevue/button'
 import DatePicker from 'primevue/datepicker'
+import InputNumber from 'primevue/inputnumber'
 import SelectButton from 'primevue/selectbutton'
 import Message from 'primevue/message'
+import { useConfirm } from 'primevue/useconfirm'
 import { useToast } from 'primevue/usetoast'
 import { feathersClient } from '@/services/feathers'
 import type { LibroResumenTipo } from '@/types'
 
 const toast = useToast()
+const confirm = useConfirm()
 
 const tipoOptions: { label: string; value: 'ventas' | 'compras' }[] = [
   { label: 'Libro de Ventas', value: 'ventas' },
@@ -28,24 +31,88 @@ const periodo = computed(() => {
   return `${y}-${m}`
 })
 
+// Un libro que el SII pide por notificación va marcado como ESPECIAL y lleva
+// el folio de esa notificación; sin folio sale el libro MENSUAL de siempre,
+// que es el uso normal.
+const folioNotificacion = ref<number | null>(null)
+
+// Qué proporción del IVA de uso común se puede usar como crédito. Si se deja
+// vacío, el server lo calcula desde las ventas del período (ver
+// generate-libro.service.ts) — se completa a mano cuando el cálculo real del
+// contribuyente difiere, porque legalmente se acumula desde enero.
+const factorProporcionalidad = ref<number | null>(null)
+
 const generating = ref(false)
-const resultado = ref<{ filename: string; xmlBase64: string; resumen: LibroResumenTipo[] } | null>(null)
+const enviando = ref(false)
+const resultado = ref<{
+  filename: string
+  xmlBase64: string
+  resumen: LibroResumenTipo[]
+  trackId?: string
+} | null>(null)
 const errorMsg = ref<string | null>(null)
 
 const totalDocumentos = computed(() => resultado.value?.resumen.reduce((sum, r) => sum + r.totDoc, 0) ?? 0)
 const totalGeneral = computed(() => resultado.value?.resumen.reduce((sum, r) => sum + r.totMntTotal, 0) ?? 0)
+
+// El factor que terminó usando el libro — importa mostrarlo porque cuando el
+// campo se deja vacío lo calcula el server, y quien declara tiene que ver
+// con qué número quedó.
+const factorUsado = computed(() => resultado.value?.resumen.find((r) => r.fctProp !== undefined)?.fctProp)
+
+function parametros(enviar: boolean) {
+  return {
+    periodo: periodo.value,
+    tipo: tipo.value,
+    folioNotificacion: folioNotificacion.value ?? undefined,
+    // Solo tiene sentido en el libro de compras; mandarlo en uno de ventas
+    // sería ruido.
+    factorProporcionalidadIva:
+      tipo.value === 'compras' ? (factorProporcionalidad.value ?? undefined) : undefined,
+    enviar
+  }
+}
 
 async function generar(): Promise<void> {
   generating.value = true
   errorMsg.value = null
   resultado.value = null
   try {
-    resultado.value = await feathersClient.service('generate-libro').create({ periodo: periodo.value, tipo: tipo.value })
+    resultado.value = await feathersClient.service('generate-libro').create(parametros(false))
   } catch (e) {
     errorMsg.value = e instanceof Error ? e.message : 'Error desconocido'
   } finally {
     generating.value = false
   }
+}
+
+// Enviar rearma el libro con los mismos parámetros y lo sube: el XML que se
+// manda es el que se acaba de revisar, no uno guardado de antes.
+function enviar(): void {
+  confirm.require({
+    message:
+      'Se enviará el libro al SII. Un libro enviado no se puede deshacer: corregirlo después exige un libro RECTIFICA con código de autorización.',
+    header: '¿Enviar el libro al SII?',
+    icon: 'pi pi-exclamation-triangle',
+    acceptLabel: 'Enviar',
+    accept: async () => {
+      enviando.value = true
+      errorMsg.value = null
+      try {
+        resultado.value = await feathersClient.service('generate-libro').create(parametros(true))
+        toast.add({
+          severity: 'success',
+          summary: 'Libro enviado',
+          detail: `N° Envío ${resultado.value?.trackId}`,
+          life: 6000
+        })
+      } catch (e) {
+        errorMsg.value = e instanceof Error ? e.message : 'Error desconocido'
+      } finally {
+        enviando.value = false
+      }
+    }
+  })
 }
 
 // El XML viaja en base64 dentro del JSON (mismo patrón que
@@ -73,8 +140,8 @@ function descargar(): void {
 
     <p class="page-hint">
       Genera y firma la Información Electrónica de Compras y Ventas (IECV) del período seleccionado a partir de los
-      documentos ya registrados. La subida al SII sigue siendo manual, por el portal de "Envío de Información de
-      Compra y Venta" (Certificación o Producción según corresponda) — este paso solo arma y firma el archivo.
+      documentos ya registrados. Primero se genera para revisar el resumen, y recién ahí se envía al SII: un libro
+      enviado no se puede deshacer.
     </p>
 
     <div class="filters surface-card">
@@ -86,6 +153,21 @@ function descargar(): void {
         <span>Período</span>
         <DatePicker v-model="periodoDate" view="month" date-format="mm/yy" />
       </label>
+      <label class="field">
+        <span>Folio de notificación</span>
+        <InputNumber v-model="folioNotificacion" :min="1" :use-grouping="false" placeholder="Solo si el SII lo pidió" />
+      </label>
+      <label v-if="tipo === 'compras'" class="field">
+        <span>Factor de proporcionalidad IVA</span>
+        <InputNumber
+          v-model="factorProporcionalidad"
+          :min="0"
+          :max="1"
+          :min-fraction-digits="2"
+          :max-fraction-digits="3"
+          placeholder="Se calcula solo"
+        />
+      </label>
       <Button label="Generar" icon="pi pi-cog" :loading="generating" @click="generar" />
     </div>
 
@@ -95,9 +177,22 @@ function descargar(): void {
       <div class="result-header">
         <div>
           <strong>{{ resultado.filename }}</strong>
-          <span class="muted">{{ totalDocumentos }} documento(s) — total ${{ totalGeneral.toLocaleString('es-CL') }}</span>
+          <span class="muted">
+            {{ totalDocumentos }} documento(s) — total ${{ totalGeneral.toLocaleString('es-CL') }}
+            <template v-if="factorUsado !== undefined"> — factor de proporcionalidad {{ factorUsado }}</template>
+          </span>
+          <span v-if="resultado.trackId" class="track-id">Enviado al SII — N° Envío {{ resultado.trackId }}</span>
         </div>
-        <Button label="Descargar XML" icon="pi pi-download" @click="descargar" />
+        <div class="result-actions">
+          <Button label="Descargar XML" icon="pi pi-download" outlined @click="descargar" />
+          <Button
+            v-if="!resultado.trackId"
+            label="Enviar al SII"
+            icon="pi pi-send"
+            :loading="enviando"
+            @click="enviar"
+          />
+        </div>
       </div>
 
       <DataTable :value="resultado.resumen" data-key="tipoDoc" size="small">
@@ -175,5 +270,18 @@ function descargar(): void {
   font-weight: 400;
   color: var(--text-secondary);
   margin-top: 0.15rem;
+}
+
+.result-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.track-id {
+  display: block;
+  margin-top: 0.35rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--p-primary-color, #2563eb);
 }
 </style>

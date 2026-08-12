@@ -205,7 +205,13 @@ export interface LibroResumenTipo {
   totMntIVA: number
   totMntTotal: number
   totIVAUsoComun?: number
-  totIVARetTotal?: number
+  // Factor de proporcionalidad usado para el IVA de uso común y el crédito
+  // que resulta. Lo calcula el server desde las ventas del período si no se
+  // le pasa uno (ver generate-libro.service.ts).
+  fctProp?: number
+  totCredIVAUsoComun?: number
+  totIVANoRec?: { codIVANoRec: number; totOpIVANoRec: number; totMntIVANoRec: number }[]
+  totOtrosImp?: { codImp: number; totMntImp: number }[]
 }
 
 export type PurchaseTipoDocumento = 'factura' | 'boleta' | 'nota_credito' | 'nota_debito' | 'factura_compra'
@@ -219,6 +225,25 @@ export interface PurchaseSiiAcuse {
   descResp: string
 }
 
+// Motivos por los que el IVA de una compra no da derecho a crédito fiscal
+// (tabla <IVANoRec> del Formato IECV).
+export type PurchaseCodigoIvaNoRec = 1 | 2 | 3 | 4 | 9
+
+// Lo que se manda al guardar una compra. Se separa de `Purchase` porque acá
+// `null` tiene un significado que en el documento guardado no existe: BORRAR
+// el campo. Un patch ignora las claves `undefined`, así que es la única
+// forma de dejar de aplicar un tratamiento de IVA al editar.
+export type PurchaseWrite = Partial<Omit<Purchase, 'ivaNoRecuperable' | 'referencia'>> & {
+  ivaNoRecuperable?: Purchase['ivaNoRecuperable'] | null
+  referencia?: Purchase['referencia'] | null
+}
+
+export interface PurchaseReferencia {
+  tipoDocumento: PurchaseTipoDocumento
+  folio: string
+  electronico?: boolean
+}
+
 export interface Purchase {
   _id: string
   supplierId: string
@@ -228,10 +253,19 @@ export interface Purchase {
   fechaVencimiento?: string
   glosa?: string
   montoNeto: number
+  // Solo el IVA con derecho a crédito; los otros tres tratamientos van en
+  // los campos de abajo (ver purchase.model.ts en el server).
   montoIva: number
   montoExento: number
+  ivaUsoComun?: number
+  ivaNoRecuperable?: { codigo: PurchaseCodigoIvaNoRec; monto: number }
+  ivaRetenidoTotal?: number
+  referencia?: PurchaseReferencia
   montoTotal: number
   pagado: boolean
+  // Decide si el documento va al Libro de Compras con su código electrónico
+  // (33) o manual (30). Ausente = electrónico.
+  electronico?: boolean
   origen?: 'manual' | 'email'
   siiAcuse?: PurchaseSiiAcuse
   createdAt: string
