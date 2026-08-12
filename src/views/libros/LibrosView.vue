@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Button from 'primevue/button'
@@ -55,6 +55,15 @@ const resultado = ref<{
   trackId?: string
 } | null>(null)
 const errorMsg = ref<string | null>(null)
+
+// Cualquier cambio de parámetro invalida lo que hay en pantalla: el resumen
+// mostrado corresponde al libro que se generó, no al que está configurado
+// ahora. Dejarlo visible es peligroso — se podría apretar "Enviar al SII"
+// creyendo que se revisó ese libro cuando en pantalla está el anterior.
+watch([tipo, periodo, folioNotificacion, factorProporcionalidad], () => {
+  resultado.value = null
+  errorMsg.value = null
+})
 
 // El Libro de Guías no agrupa por tipo de documento (todas sus líneas son
 // guías), así que trae su propio resumen y el conteo sale de ahí.
