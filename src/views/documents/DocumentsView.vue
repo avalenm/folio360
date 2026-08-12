@@ -76,6 +76,15 @@ const COD_REF_CORRIGE_TEXTO = 2
 // precios (ver sii/dte-xml.ts en el servidor).
 const INDICADORES_TRASLADO_VENTA = [1, 9]
 
+// Quién se hace cargo del traslado — distinto del motivo (INDICADORES_TRASLADO).
+// El SII no lo pide cuando el documento no acompaña bienes, por eso se puede
+// dejar vacío; ver <TpoDespacho> en el Formato DTE.
+const TIPOS_DESPACHO = [
+  { label: 'Por cuenta del cliente', value: 1 },
+  { label: 'Por cuenta del emisor, al local del cliente', value: 2 },
+  { label: 'Por cuenta del emisor, a otras instalaciones', value: 3 }
+]
+
 const INDICADORES_TRASLADO = [
   { label: 'Operación constituye venta', value: 1 },
   { label: 'Ventas por efectuar', value: 2 },
@@ -274,6 +283,7 @@ const draft = reactive({
   referenciaCodRef: 1,
   referenciaRazon: '',
   indTraslado: 1,
+  tpoDespacho: null as number | null,
   descuentoGlobalPct: 0,
   items: [blankItem()] as ItemDraft[]
 })
@@ -390,6 +400,7 @@ function openCreate(): void {
   draft.referenciaCodRef = 1
   draft.referenciaRazon = ''
   draft.indTraslado = 1
+  draft.tpoDespacho = null
   draft.descuentoGlobalPct = 0
   draft.items = [blankItem()]
   dialogVisible.value = true
@@ -409,6 +420,7 @@ function openEdit(document: DteDocument): void {
     ? (documents.value.find((d) => d.tipoDte === referencia.tipoDteRef && d.folio === referencia.folioRef)?._id ?? '')
     : ''
   draft.indTraslado = document.indTraslado ?? 1
+  draft.tpoDespacho = document.tpoDespacho ?? null
   draft.descuentoGlobalPct = document.descuentoGlobalPct ?? 0
   draft.items = document.items.map((item) => ({ ...item, key: (itemKeySeq += 1) }))
   dialogVisible.value = true
@@ -476,6 +488,10 @@ async function handleSave(): Promise<void> {
         supplierId: TIPOS_DTE_COMPRA.includes(draft.tipoDte) ? draft.supplierId : undefined,
         giroReceptor: draft.giroReceptor || undefined,
         indTraslado: TIPOS_DTE_REQUIEREN_TRASLADO.includes(draft.tipoDte) ? draft.indTraslado : undefined,
+        tpoDespacho:
+          TIPOS_DTE_REQUIEREN_TRASLADO.includes(draft.tipoDte) && draft.tpoDespacho
+            ? draft.tpoDespacho
+            : undefined,
         descuentoGlobalPct: draft.tipoDte !== 34 && draft.descuentoGlobalPct ? draft.descuentoGlobalPct : undefined,
         referencias,
         items
@@ -1074,6 +1090,23 @@ onMounted(async () => {
               option-value="value"
               :disabled="!!editingId"
             />
+          </label>
+
+          <label v-if="TIPOS_DTE_REQUIEREN_TRASLADO.includes(draft.tipoDte)" class="field">
+            <span>Traslado por cuenta de</span>
+            <Select
+              v-model="draft.tpoDespacho"
+              :options="TIPOS_DESPACHO"
+              option-label="label"
+              option-value="value"
+              placeholder="Sin especificar"
+              show-clear
+              :disabled="!!editingId"
+            />
+            <small class="giro-hint">
+              <i class="pi pi-info-circle" /> Quién se hace cargo del despacho. Se puede dejar vacío solo si la
+              guía no acompaña bienes.
+            </small>
           </label>
         </section>
 

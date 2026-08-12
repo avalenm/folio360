@@ -162,6 +162,10 @@ export interface DteDocument {
   giroReceptor?: string
   // Solo para Guía de Despacho (52) — ver document.model.ts en el servidor.
   indTraslado?: number
+  // Quién se hace cargo del traslado. No confundir con indTraslado, que es
+  // el MOTIVO (venta, consignación, traslado interno...) — ver
+  // document.model.ts en el server.
+  tpoDespacho?: number
   items: DteItem[]
   // Descuento global (%) sobre el subtotal de ítems afectos — ver
   // document.model.ts en el servidor.
