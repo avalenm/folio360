@@ -83,6 +83,11 @@ const COD_REF_CORRIGE_TEXTO = 2
 // precios (ver sii/dte-xml.ts en el servidor).
 const INDICADORES_TRASLADO_VENTA = [1, 9]
 
+// Traslado interno: la mercadería se mueve entre instalaciones de la propia
+// empresa, así que el receptor es el mismo emisor y no hay de quién sea "por
+// cuenta" el despacho — ver documents.service.ts, que también lo descarta.
+const IND_TRASLADO_INTERNO = 5
+
 // Quién se hace cargo del traslado — distinto del motivo (INDICADORES_TRASLADO).
 // El SII no lo pide cuando el documento no acompaña bienes, por eso se puede
 // dejar vacío; ver <TpoDespacho> en el Formato DTE.
@@ -91,6 +96,10 @@ const TIPOS_DESPACHO = [
   { label: 'Por cuenta del emisor, al local del cliente', value: 2 },
   { label: 'Por cuenta del emisor, a otras instalaciones', value: 3 }
 ]
+
+const esTrasladoInterno = computed(
+  () => TIPOS_DTE_REQUIEREN_TRASLADO.includes(draft.tipoDte) && draft.indTraslado === IND_TRASLADO_INTERNO
+)
 
 const INDICADORES_TRASLADO = [
   { label: 'Operación constituye venta', value: 1 },
@@ -315,6 +324,14 @@ watch(
     }
   }
 )
+
+// Si el traslado pasa a ser interno, el despacho "por cuenta de" deja de
+// tener sentido: se limpia para no arrastrar un valor que el formulario ya
+// no muestra (el servidor lo descarta igual, esto es para que el borrador
+// guardado coincida con lo que se ve).
+watch(esTrasladoInterno, (interno) => {
+  if (interno) draft.tpoDespacho = null
+})
 
 // Un cliente/proveedor puede tener varios giros registrados (ver
 // customer.model.ts/supplier.model.ts), pero el DTE solo debe llevar el que
@@ -1116,7 +1133,7 @@ onMounted(async () => {
             />
           </label>
 
-          <label v-if="TIPOS_DTE_REQUIEREN_TRASLADO.includes(draft.tipoDte)" class="field">
+          <label v-if="TIPOS_DTE_REQUIEREN_TRASLADO.includes(draft.tipoDte) && !esTrasladoInterno" class="field">
             <span>Traslado por cuenta de</span>
             <Select
               v-model="draft.tpoDespacho"
@@ -1132,6 +1149,12 @@ onMounted(async () => {
               guía no acompaña bienes.
             </small>
           </label>
+
+          <p v-if="esTrasladoInterno" class="giro-hint">
+            <i class="pi pi-info-circle" /> En un traslado interno la mercadería se mueve entre instalaciones de
+            la propia empresa, así que el receptor debe ser la empresa misma y no corresponde indicar por cuenta
+            de quién va el despacho.
+          </p>
         </section>
 
         <section v-if="TIPOS_DTE_REQUIEREN_REFERENCIA.includes(draft.tipoDte)" class="doc-section">
