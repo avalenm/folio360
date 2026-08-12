@@ -396,6 +396,7 @@ async function applyProduct(item: ItemDraft, productId: string | null): Promise<
 function blankExportacion() {
   return {
     moneda: 'DOLAR USA',
+    tipoCambio: null as number | null,
     indServicio: null as number | null,
     fmaPagExp: null as number | null,
     modalidadVenta: null as number | null,
@@ -412,6 +413,9 @@ function blankExportacion() {
     unidadPesoNeto: null as number | null,
     totalBultos: null as number | null,
     tipoBultos: null as number | null,
+    marcas: '',
+    idContainer: '',
+    sello: '',
     flete: null as number | null,
     seguro: null as number | null,
     paisRecep: null as number | null,
@@ -537,9 +541,11 @@ const montosPreview = computed(() => {
     return { netoBruto: 0, descuentoGlobal: 0, neto: 0, exento: 0, iva: 0, comision: 0, total: 0 }
   }
 
-  // Exportación: todo exento, con decimales, y los recargos/descuentos
-  // globales suman/restan directo — mismo criterio que el servidor
-  // (calcularMontosExportacion en montos.ts), trabajando en centésimas.
+  // Exportación: todo exento, y los recargos/descuentos globales
+  // suman/restan directo — mismo criterio que el servidor
+  // (calcularMontosExportacion en montos.ts), trabajando en centésimas. El
+  // total del encabezado se redondea a entero, igual que el servidor (el
+  // timbre del SII no admite decimales).
   if (esExportacion.value) {
     const itemsCent = draft.items.reduce((sum, item) => sum + Math.round(montoItemExportacion(item) * 100), 0)
     let exentoCent = itemsCent
@@ -547,7 +553,8 @@ const montosPreview = computed(() => {
       const montoCent = linea.tpoValor === '%' ? Math.round((itemsCent * linea.valor) / 100) : Math.round(linea.valor * 100)
       exentoCent += linea.tpoMov === 'R' ? montoCent : -montoCent
     }
-    return { netoBruto: 0, descuentoGlobal: 0, neto: 0, exento: exentoCent / 100, iva: 0, comision: 0, total: exentoCent / 100 }
+    const exento = Math.round(exentoCent / 100)
+    return { netoBruto: 0, descuentoGlobal: 0, neto: 0, exento, iva: 0, comision: 0, total: exento }
   }
 
   let netoBruto = 0
@@ -688,6 +695,13 @@ async function handleSave(): Promise<void> {
 
   if (!editingId.value && esExportacion.value && !draft.exportacion.moneda) {
     toast.add({ severity: 'warn', summary: 'Falta la moneda de la operación', life: 3000 })
+    return
+  }
+
+  // El SII exige la sección OtraMoneda con los montos en pesos: sin tipo de
+  // cambio el servidor rechaza el borrador (ver documents.service.ts).
+  if (!editingId.value && esExportacion.value && draft.exportacion.moneda !== 'PESO CL' && !draft.exportacion.tipoCambio) {
+    toast.add({ severity: 'warn', summary: 'Falta el tipo de cambio a pesos', life: 3000 })
     return
   }
 
@@ -1544,6 +1558,10 @@ onMounted(async () => {
               <Select v-model="draft.exportacion.moneda" :options="MONEDAS_EXPORTACION" filter :disabled="!!editingId" />
             </label>
             <label class="field">
+              <span>Tipo de cambio (pesos por unidad)</span>
+              <InputNumber v-model="draft.exportacion.tipoCambio" :min="0" mode="decimal" :max-fraction-digits="4" fluid />
+            </label>
+            <label class="field">
               <span>Forma de pago exportación</span>
               <Select
                 v-model="draft.exportacion.fmaPagExp"
@@ -1675,12 +1693,26 @@ onMounted(async () => {
               <InputNumber v-model="draft.exportacion.totalBultos" :min="0" fluid />
             </label>
             <label class="field">
+              <span>Marcas de los bultos</span>
+              <InputText v-model="draft.exportacion.marcas" placeholder="S/M si no llevan" />
+            </label>
+            <label class="field">
               <span>Flete</span>
               <InputNumber v-model="draft.exportacion.flete" :min="0" mode="decimal" :max-fraction-digits="2" fluid />
             </label>
             <label class="field">
               <span>Seguro</span>
               <InputNumber v-model="draft.exportacion.seguro" :min="0" mode="decimal" :max-fraction-digits="2" fluid />
+            </label>
+          </div>
+          <div class="form-row">
+            <label class="field">
+              <span>Id. del contenedor</span>
+              <InputText v-model="draft.exportacion.idContainer" placeholder="Solo si el bulto es contenedor" />
+            </label>
+            <label class="field">
+              <span>Sello del contenedor</span>
+              <InputText v-model="draft.exportacion.sello" placeholder="Solo si el bulto es contenedor" />
             </label>
           </div>
           <div class="form-row">

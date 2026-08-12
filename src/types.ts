@@ -186,6 +186,9 @@ export interface DteReferencia {
 // codigosAduana.ts.
 export interface DteExportacion {
   moneda: string
+  // Pesos por unidad de la moneda — obligatorio salvo PESO CL: el SII exige
+  // la sección OtraMoneda con los montos en pesos (ver el servidor).
+  tipoCambio?: number
   indServicio?: number
   fmaPagExp?: number
   modalidadVenta?: number
@@ -203,6 +206,12 @@ export interface DteExportacion {
   totalItems?: number
   totalBultos?: number
   tipoBultos?: number
+  // Marcas de los bultos ("S/M" si no llevan) — obligatorio con bultos; el
+  // identificador y sello son obligatorios cuando el bulto es un contenedor.
+  marcas?: string
+  idContainer?: string
+  sello?: string
+  emisorSello?: string
   flete?: number
   seguro?: number
   paisRecep?: number
