@@ -68,6 +68,14 @@ const CODIGOS_REFERENCIA = [
   { label: 'Corrige montos', value: 3 }
 ]
 
+// Una nota que solo corrige texto no puede llevar montos: el SII la observa
+// con "Modifica Texto no debe tener montos" (ver documents.service.ts).
+const COD_REF_CORRIGE_TEXTO = 2
+
+// Los únicos traslados que constituyen venta; en el resto la guía no lleva
+// precios (ver sii/dte-xml.ts en el servidor).
+const INDICADORES_TRASLADO_VENTA = [1, 9]
+
 const INDICADORES_TRASLADO = [
   { label: 'Operación constituye venta', value: 1 },
   { label: 'Ventas por efectuar', value: 2 },
@@ -184,6 +192,7 @@ interface ItemDraft extends DteItem {
 let itemKeySeq = 0
 
 function montoItem(item: ItemDraft): number {
+  if (sinMontos.value) return 0
   return Math.round(item.cantidad * item.precioUnit - (item.descuento ?? 0))
 }
 
@@ -333,10 +342,28 @@ function copiarItemsReferencia(): void {
   draft.items = doc.items.map((item) => ({ ...item, key: (itemKeySeq += 1) }))
 }
 
+// Hay documentos que el SII exige que vayan enteros en cero, aunque el
+// usuario haya escrito precios: una nota de crédito/débito que solo corrige
+// texto (CodRef=2, "fe de erratas") y una guía de despacho que no constituye
+// venta. El servidor los normaliza al guardar (ver documents.service.ts y
+// montos.ts), así que la vista previa tiene que reflejar lo mismo — si no,
+// muestra un total que el documento emitido no va a tener.
+const sinMontos = computed(
+  () =>
+    (TIPOS_DTE_REQUIEREN_REFERENCIA.includes(draft.tipoDte) &&
+      draft.referenciaCodRef === COD_REF_CORRIGE_TEXTO) ||
+    (TIPOS_DTE_REQUIEREN_TRASLADO.includes(draft.tipoDte) &&
+      !INDICADORES_TRASLADO_VENTA.includes(draft.indTraslado))
+)
+
 // Vista previa client-side de los montos — los reales los recalcula el
 // servidor (montos.ts), esto es solo para que el usuario vea el total antes
 // de guardar.
 const montosPreview = computed(() => {
+  if (sinMontos.value) {
+    return { netoBruto: 0, descuentoGlobal: 0, neto: 0, exento: 0, iva: 0, total: 0 }
+  }
+
   let netoBruto = 0
   let exento = 0
 
@@ -1111,6 +1138,17 @@ onMounted(async () => {
           <p v-if="draft.items.length >= MAX_DETALLE_LINES" class="giro-hint">
             <i class="pi pi-info-circle" /> Máximo {{ MAX_DETALLE_LINES }} ítems por documento (límite del SII).
           </p>
+          <p v-if="sinMontos" class="giro-hint">
+            <i class="pi pi-info-circle" />
+            <template v-if="TIPOS_DTE_REQUIEREN_TRASLADO.includes(draft.tipoDte)">
+              Este traslado no constituye venta, así que la guía se emite sin precios: solo se detalla qué se
+              traslada y en qué cantidad.
+            </template>
+            <template v-else>
+              Una nota que solo corrige texto no puede llevar montos, así que se emite en $0. Si necesitas
+              corregir valores, usa "Corrige montos" o "Anula documento".
+            </template>
+          </p>
 
           <div class="items-card">
             <div class="items-head">
@@ -1145,10 +1183,10 @@ onMounted(async () => {
                 <InputNumber v-model="item.cantidad" :min="0" fluid />
               </div>
               <div class="col-num">
-                <InputNumber v-model="item.precioUnit" :min="0" mode="decimal" fluid />
+                <InputNumber v-model="item.precioUnit" :min="0" mode="decimal" fluid :disabled="sinMontos" />
               </div>
               <div class="col-num">
-                <InputNumber v-model="item.descuento" :min="0" mode="decimal" fluid />
+                <InputNumber v-model="item.descuento" :min="0" mode="decimal" fluid :disabled="sinMontos" />
               </div>
               <div class="col-exento">
                 <ToggleSwitch v-model="item.exento" :disabled="draft.tipoDte === 34" />
@@ -1174,7 +1212,14 @@ onMounted(async () => {
 
           <label v-if="draft.tipoDte !== 34" class="field" style="max-width: 260px; margin-top: 0.75rem">
             <span>Descuento global ítems afectos (%)</span>
-            <InputNumber v-model="draft.descuentoGlobalPct" :min="0" :max="100" suffix="%" fluid :disabled="!!editingId" />
+            <InputNumber
+              v-model="draft.descuentoGlobalPct"
+              :min="0"
+              :max="100"
+              suffix="%"
+              fluid
+              :disabled="!!editingId || sinMontos"
+            />
           </label>
         </section>
 
