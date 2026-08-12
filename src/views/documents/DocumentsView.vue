@@ -19,6 +19,7 @@ import { useAuthStore } from '@/stores/auth'
 import { feathersClient } from '@/services/feathers'
 import FacturaPreview from './FacturaPreview.vue'
 import type { Customer, DteDocument, DteItem, DtePago, Product, Supplier, ValorUf } from '@/types'
+import { TIPOS_DTE_EMITIBLES, nombreCortoTipoDte, tipoDteCorto, tipoDteLabel } from '@/tiposDte'
 
 const { items: documents, loading, fetchAll, create, update, remove } = useResource<DteDocument>('documents')
 const { items: customers, fetchAll: fetchCustomers } = useResource<Customer>('customers')
@@ -33,19 +34,6 @@ const ambientes = [
   { label: 'Producción', value: 'produccion' }
 ]
 
-// Factura Electrónica (33), Factura No Afecta o Exenta (34), Guía de
-// Despacho (52), Factura de Compra (46) y Notas de Crédito/Débito
-// Electrónicas (61/56) están implementadas (firma/emisión, ver memoria
-// "facturacion-sii-signing") — se deja como lista para que agregar otro
-// tipo el día de mañana sea solo sumar una opción.
-const tiposDte = [
-  { label: 'Factura Electrónica (33)', corto: 'Factura', value: 33 },
-  { label: 'Factura No Afecta o Exenta Electrónica (34)', corto: 'Factura exenta', value: 34 },
-  { label: 'Guía de Despacho Electrónica (52)', corto: 'Guía de despacho', value: 52 },
-  { label: 'Factura de Compra Electrónica (46)', corto: 'Factura de compra', value: 46 },
-  { label: 'Nota de Crédito Electrónica (61)', corto: 'Nota de crédito', value: 61 },
-  { label: 'Nota de Débito Electrónica (56)', corto: 'Nota de débito', value: 56 }
-]
 
 const TIPOS_DTE_REQUIEREN_REFERENCIA = [56, 61]
 const TIPOS_DTE_REQUIEREN_TRASLADO = [52]
@@ -58,16 +46,6 @@ const TIPOS_DTE_COMPRA = [46]
 // a chocar con ese rechazo.
 const MAX_DETALLE_LINES = 60
 
-function tipoDteLabel(tipoDte: number): string {
-  return tiposDte.find((t) => t.value === tipoDte)?.label ?? `Tipo ${tipoDte}`
-}
-
-// Para la tabla: el nombre sin el "Electrónica" que se repite en todos, pero
-// conservando el código, que es como el SII los identifica.
-function tipoDteCorto(tipoDte: number): string {
-  const tipo = tiposDte.find((t) => t.value === tipoDte)
-  return tipo ? `${tipo.corto} (${tipo.value})` : `Tipo ${tipoDte}`
-}
 
 const CODIGOS_REFERENCIA = [
   { label: 'Anula documento', value: 1 },
@@ -696,9 +674,7 @@ const documentosQuePuedenFacturar = computed(() =>
     )
     .map((d) => ({
       value: d._id,
-      label: `${tiposDte.find((t) => t.value === d.tipoDte)?.corto ?? d.tipoDte} N° ${d.folio} — $${formatMoney(
-        d.montos.total
-      )}`
+      label: `${nombreCortoTipoDte(d.tipoDte)} N° ${d.folio} — $${formatMoney(d.montos.total)}`
     }))
 )
 
@@ -1090,7 +1066,7 @@ onMounted(async () => {
         <span>Tipo de documento</span>
         <Select
           v-model="filterTipo"
-          :options="tiposDte"
+          :options="TIPOS_DTE_EMITIBLES"
           option-label="corto"
           option-value="value"
           placeholder="Todos"
@@ -1210,7 +1186,7 @@ onMounted(async () => {
               <span>Tipo de documento</span>
               <Select
                 v-model="draft.tipoDte"
-                :options="tiposDte"
+                :options="TIPOS_DTE_EMITIBLES"
                 option-label="label"
                 option-value="value"
                 :disabled="!!editingId"

@@ -14,6 +14,7 @@ import { useConfirm } from 'primevue/useconfirm'
 import { useToast } from 'primevue/usetoast'
 import { useResource } from '@/composables/useResource'
 import type { Caf } from '@/types'
+import { nombreTipoDte } from '@/tiposDte'
 
 const { items, loading, fetchAll, create, remove } = useResource<Caf>('caf')
 const confirm = useConfirm()
@@ -26,18 +27,6 @@ const ambientes = [
 
 // Mismos nombres que usan documents/DocumentsView.vue y pdf/dte-pdf.ts —
 // tipos de DTE ya implementados (ver signing/dte-xml.ts).
-const TIPO_DTE_NOMBRE: Record<number, string> = {
-  33: 'Factura Electrónica',
-  34: 'Factura No Afecta o Exenta Electrónica',
-  46: 'Factura de Compra Electrónica',
-  52: 'Guía de Despacho Electrónica',
-  56: 'Nota de Débito Electrónica',
-  61: 'Nota de Crédito Electrónica'
-}
-
-function nombreTipoDte(tipoDte: number): string {
-  return TIPO_DTE_NOMBRE[tipoDte] ?? `Tipo ${tipoDte}`
-}
 
 // Un CAF queda sin folios cuando folioActual llega a folioHasta (reserve-folio.ts
 // nunca lo deja pasar de ahí). Una vez agotado ya no aporta nada a la vista del
