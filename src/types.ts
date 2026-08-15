@@ -11,6 +11,12 @@ export interface Organization {
   razonSocial: string
   giro?: string
   direccion?: { calle?: string; comuna?: string; ciudad?: string }
+  // Dirección Regional/Unidad del SII del emisor — va bajo el recuadro en
+  // la representación impresa (ver organization.model.ts en el servidor).
+  unidadSii?: string
+  // Logotipo (PNG/JPEG en base64) para la esquina superior izquierda del
+  // PDF — Manual de Muestras Impresas 1.1.3.
+  logoPng?: string
   dbName: string
   ambiente: Ambiente
   estado: 'onboarding' | 'activo' | 'suspendido'

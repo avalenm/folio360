@@ -38,6 +38,34 @@ function openEdit(org: Organization): void {
   dialogVisible.value = true
 }
 
+// El logo viaja como base64 dentro del documento de la organización y se
+// dibuja en la esquina superior izquierda de la representación impresa
+// (máximo 1/5 del documento según el Manual de Muestras Impresas — el PDF
+// lo escala a 3x2 cm). Se limita el archivo para no inflar el documento.
+const MAX_LOGO_BYTES = 300 * 1024
+
+function onLogoChange(event: Event): void {
+  const file = (event.target as HTMLInputElement).files?.[0]
+  if (!file) return
+
+  if (file.size > MAX_LOGO_BYTES) {
+    toast.add({ severity: 'warn', summary: 'Logo muy pesado', detail: 'Máximo 300 KB (PNG o JPEG)', life: 4000 })
+    return
+  }
+
+  const reader = new FileReader()
+  reader.onload = () => {
+    // El data URL trae el prefijo "data:image/png;base64," — se guarda solo
+    // el base64, que es lo que el generador de PDF espera.
+    draft.logoPng = String(reader.result).split(',')[1]
+  }
+  reader.readAsDataURL(file)
+}
+
+function quitarLogo(): void {
+  draft.logoPng = ''
+}
+
 async function handleSave(): Promise<void> {
   if (!editingId.value) return
 
@@ -92,6 +120,18 @@ async function handleSave(): Promise<void> {
           <span>Giro</span>
           <InputText v-model="draft.giro" />
         </label>
+        <label class="field">
+          <span>Unidad del SII (para la representación impresa)</span>
+          <InputText v-model="draft.unidadSii" placeholder="Ej: SANTIAGO ORIENTE" />
+        </label>
+        <label class="field">
+          <span>Logo (PNG o JPEG, máx. 300 KB)</span>
+          <input type="file" accept="image/png,image/jpeg" @change="onLogoChange" />
+        </label>
+        <div v-if="draft.logoPng" class="logo-preview">
+          <img :src="`data:image;base64,${draft.logoPng}`" alt="Logo de la empresa" />
+          <Button label="Quitar logo" icon="pi pi-times" text size="small" type="button" @click="quitarLogo" />
+        </div>
 
         <div class="form-actions">
           <Button label="Cancelar" text @click="dialogVisible = false" />
@@ -163,5 +203,21 @@ async function handleSave(): Promise<void> {
   justify-content: flex-end;
   gap: 0.5rem;
   margin-top: 0.5rem;
+}
+
+.logo-preview {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.logo-preview img {
+  max-height: 56px;
+  max-width: 160px;
+  object-fit: contain;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 4px;
+  background: #fff;
 }
 </style>
