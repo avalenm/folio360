@@ -1239,7 +1239,18 @@ const rowMenuItems = computed<MenuItem[]>(() => {
   const document = menuDocument.value
   if (!document) return []
 
-  const items: MenuItem[] = [{ label: 'Vista previa', icon: 'pi pi-eye', command: () => openPreview(document) }]
+  // En un borrador, la vista previa es también el lugar donde se emite y
+  // firma: el nombre lo dice para que no haya que descubrirlo entrando
+  // (feedback del usuario, 2026-08-13). Para vendedor —que no puede
+  // emitir— y para documentos ya emitidos, sigue siendo solo vista previa.
+  const puedeEmitir = document.estado === 'draft' && auth.hasMinRole('contador')
+  const items: MenuItem[] = [
+    {
+      label: puedeEmitir ? 'Revisar y emitir…' : 'Vista previa',
+      icon: puedeEmitir ? 'pi pi-verified' : 'pi pi-eye',
+      command: () => openPreview(document)
+    }
+  ]
 
   if (document.estado !== 'draft') {
     items.push({ label: 'Descargar PDF', icon: 'pi pi-file-pdf', command: () => downloadPdf(document) })
@@ -2231,7 +2242,12 @@ onMounted(async () => {
       </template>
     </Dialog>
 
-    <Dialog v-model:visible="previewVisible" modal header="Vista previa" style="width: 640px">
+    <Dialog
+      v-model:visible="previewVisible"
+      modal
+      :header="previewDocument?.estado === 'draft' ? 'Revisar y emitir' : 'Vista previa'"
+      style="width: 640px"
+    >
       <FacturaPreview
         v-if="previewDocument"
         :document="previewDocument"
