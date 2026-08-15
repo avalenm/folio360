@@ -49,9 +49,14 @@ export function useResource<T extends { _id: string }>(serviceName: string) {
     error.value = null
 
     try {
-      const result = (await feathersClient.service(serviceName).find({ query: { $limit: 100 } })) as
-        | T[]
-        | Paginated<T>
+      // Más recientes primero, SIEMPRE: sin $sort Mongo devuelve orden de
+      // inserción (los más antiguos), y con más de 100 documentos los
+      // recién creados quedaban fuera del corte — un borrador nuevo
+      // "desaparecía" de la tabla al recargar (encontrado en vivo cuando
+      // los documentos de certificación acumulados pasaron los 200).
+      const result = (await feathersClient
+        .service(serviceName)
+        .find({ query: { $limit: 100, $sort: { createdAt: -1 } } })) as T[] | Paginated<T>
       items.value = Array.isArray(result) ? result : result.data
     } catch (e) {
       error.value = e instanceof Error ? e.message : 'Error desconocido'
