@@ -67,7 +67,10 @@ export function useResource<T extends { _id: string }>(serviceName: string) {
 
   async function create(data: Partial<T>): Promise<T> {
     const created = (await feathersClient.service(serviceName).create(data)) as T
-    items.value = [created, ...items.value]
+    // upsert, no prepend a ciegas: el evento en vivo 'created' puede llegar
+    // ANTES de que esta promesa resuelva, y con ambos agregando el mismo
+    // documento la tabla lo mostraba dos veces (encontrado en vivo).
+    upsert(created)
     return created
   }
 
