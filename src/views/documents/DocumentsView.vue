@@ -174,6 +174,7 @@ function saldoOf(document: DteDocument): number {
 const filterFolio = ref('')
 const filterTipo = ref<number | null>(null)
 const filterCliente = ref('')
+const filterEstado = ref<string | null>(null)
 const filterFechas = ref<Date[] | null>(null)
 
 const filteredDocuments = computed(() =>
@@ -183,6 +184,10 @@ const filteredDocuments = computed(() =>
     }
 
     if (filterTipo.value !== null && document.tipoDte !== filterTipo.value) {
+      return false
+    }
+
+    if (filterEstado.value !== null && document.estado !== filterEstado.value) {
       return false
     }
 
@@ -209,6 +214,7 @@ function limpiarFiltros(): void {
   filterFolio.value = ''
   filterTipo.value = null
   filterCliente.value = ''
+  filterEstado.value = null
   filterFechas.value = null
 }
 
@@ -1334,6 +1340,9 @@ function estadoLabel(estado: string): string {
   return ESTADO_LABELS[estado] ?? estado
 }
 
+// Para el filtro por estado de la tabla — mismas etiquetas que los tags.
+const ESTADO_FILTRO_OPTIONS = Object.entries(ESTADO_LABELS).map(([value, label]) => ({ value, label }))
+
 function formatMoney(value: number): string {
   return value.toLocaleString('es-CL')
 }
@@ -1369,6 +1378,17 @@ onMounted(async () => {
       <label class="field">
         <span>Cliente/proveedor o RUT</span>
         <InputText v-model="filterCliente" placeholder="Nombre o RUT" />
+      </label>
+      <label class="field">
+        <span>Estado</span>
+        <Select
+          v-model="filterEstado"
+          :options="ESTADO_FILTRO_OPTIONS"
+          option-label="label"
+          option-value="value"
+          placeholder="Todos"
+          show-clear
+        />
       </label>
       <label class="field field-grow">
         <span>Fecha de emisión</span>
