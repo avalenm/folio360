@@ -103,7 +103,7 @@ const creditosPorDocumento = computed(() => {
 
     // La primera referencia a un documento real (en certificación la primera
     // es "SET", que no apunta a ningún folio nuestro).
-    const referencia = (doc.referencias ?? []).find((ref) => typeof ref.tipoDteRef === 'number')
+    const referencia = (doc.referencias ?? []).find((ref) => typeof ref.tipoDteRef === 'number' && ref.tipoDteRef < 800)
     if (!referencia) continue
 
     const clave = `${referencia.tipoDteRef}-${referencia.folioRef}`
@@ -172,7 +172,7 @@ function formatCurrency(value: number): string {
 // Las cuatro tarjetas comparten estructura — declararlas como datos evita
 // repetir el mismo bloque de marcado cuatro veces (que es lo que hacía que
 // se desalinearan entre sí).
-const stats = computed(() => [
+const statsDelMes = computed(() => [
   {
     label: 'Ventas del mes',
     value: ventasDelMes.value,
@@ -180,16 +180,6 @@ const stats = computed(() => [
     tone: 'brand',
     hint: 'Ventas netas del MES CALENDARIO en curso (facturas menos notas de crédito, por fecha de emisión). Exportaciones convertidas a pesos.',
     note: `${documentosDelMes.value.length} este mes`,
-    to: '/documents',
-    linkLabel: 'Ver documentos'
-  },
-  {
-    label: 'Por cobrar',
-    value: porCobrar.value,
-    icon: 'pi-wallet',
-    tone: 'success',
-    hint: 'TODO lo impago histórico (sin límite de período), neto de notas de crédito y abonos — por eso puede superar a las ventas del mes. El detalle con vencimientos está en Finanzas.',
-    note: `${documentosPorCobrarList.value.length} pendientes`,
     to: '/documents',
     linkLabel: 'Ver documentos'
   },
@@ -202,6 +192,20 @@ const stats = computed(() => [
     note: '19% tasa',
     to: '/documents',
     linkLabel: 'Ver documentos'
+  }
+])
+
+// Acumulado histórico: sin límite de período — deuda viva total.
+const statsAcumulado = computed(() => [
+  {
+    label: 'Por cobrar',
+    value: porCobrar.value,
+    icon: 'pi-wallet',
+    tone: 'success',
+    hint: 'TODO lo impago histórico (sin límite de período), neto de notas de crédito y abonos — por eso puede superar a las ventas del mes. El detalle con vencimientos está en Finanzas.',
+    note: `${documentosPorCobrarList.value.length} pendientes`,
+    to: '/finanzas',
+    linkLabel: 'Ver en Finanzas'
   },
   {
     label: 'Facturas por pagar',
@@ -210,8 +214,8 @@ const stats = computed(() => [
     tone: 'warning',
     hint: 'TODO lo impago a proveedores (sin límite de período): compras registradas más facturas de compra emitidas. El detalle con vencimientos está en Finanzas.',
     note: `${comprasPorPagarList.value.length} pendientes`,
-    to: '/purchases',
-    linkLabel: 'Ver compras'
+    to: '/finanzas',
+    linkLabel: 'Ver en Finanzas'
   }
 ])
 
@@ -380,8 +384,31 @@ onUnmounted(() => {
       <p class="page-subtitle">Resumen de {{ auth.currentOrganization?.razonSocial }}</p>
     </header>
 
+    <h2 class="grupo-titulo">Este mes</h2>
     <div class="stat-grid">
-      <article v-for="stat in stats" :key="stat.label" class="stat-card surface-card">
+      <article v-for="stat in statsDelMes" :key="stat.label" class="stat-card surface-card">
+        <div class="stat-top">
+          <span class="stat-label">{{ stat.label }}</span>
+          <i class="pi pi-info-circle stat-info" :title="stat.hint" />
+        </div>
+
+        <div class="stat-value-row">
+          <span class="stat-icon" :class="`stat-icon-${stat.tone}`"><i class="pi" :class="stat.icon" /></span>
+          <span class="stat-value">{{ loading ? '—' : formatCurrency(stat.value) }}</span>
+        </div>
+
+        <footer class="stat-footer">
+          <span class="stat-note">{{ stat.note }}</span>
+          <router-link :to="stat.to" class="stat-link">
+            {{ stat.linkLabel }} <i class="pi pi-arrow-right" />
+          </router-link>
+        </footer>
+      </article>
+    </div>
+
+    <h2 class="grupo-titulo">Acumulado histórico (todo lo pendiente)</h2>
+    <div class="stat-grid">
+      <article v-for="stat in statsAcumulado" :key="stat.label" class="stat-card surface-card">
         <div class="stat-top">
           <span class="stat-label">{{ stat.label }}</span>
           <i class="pi pi-info-circle stat-info" :title="stat.hint" />
@@ -496,6 +523,15 @@ onUnmounted(() => {
 }
 
 /* ---------- Tarjetas de indicador ---------- */
+.grupo-titulo {
+  margin: 0 0 0.6rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #64748b;
+}
+
 .stat-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));

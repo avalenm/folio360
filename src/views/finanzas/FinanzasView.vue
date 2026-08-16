@@ -22,7 +22,7 @@ const suppliers = ref<Supplier[]>([])
 
 const PLAZO_LEGAL_DIAS = 30
 const DIA_MS = 24 * 60 * 60 * 1000
-const ESTADOS_EMITIDOS = ['firmado', 'enviado', 'aceptado', 'reparo']
+const ESTADOS_EMITIDOS = ['pendiente_firma', 'firmado', 'enviado', 'aceptado', 'reparo']
 // Ventas (+): factura, exenta, liquidación, factura y ND de exportación, ND.
 // Restan (−): notas de crédito. La guía (52) no es venta por sí sola y la
 // factura de compra (46) es deuda con el proveedor, no venta.
@@ -96,7 +96,7 @@ const evolucion = computed(() => {
   return meses.value.map((mes) => {
     const v = ventas.get(mes) ?? 0
     const c = compras.get(mes) ?? 0
-    return { mes, ventas: v, compras: c, margen: v - c, altoVentas: (v / maximo) * 100, altoCompras: (c / maximo) * 100 }
+    return { mes, ventas: v, compras: c, margen: v - c, altoVentas: Math.max(0, (v / maximo) * 100), altoCompras: Math.max(0, (c / maximo) * 100) }
   })
 })
 
