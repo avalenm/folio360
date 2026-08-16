@@ -53,6 +53,10 @@ function ivaClp(doc: DteDocument): number {
   return [110, 111, 112].includes(doc.tipoDte) ? 0 : doc.montos.iva
 }
 
+function esNotaDeCompra(doc: DteDocument): boolean {
+  return doc.retencionIvaCompra === true && doc.tipoDte !== 46
+}
+
 const docsEmitidos = computed(() =>
   documents.value.filter(
     (d) => d.ambiente === auth.currentOrganization?.ambiente && ESTADOS_EMITIDOS.includes(d.estado)
@@ -80,7 +84,7 @@ const evolucion = computed(() => {
   const compras = new Map<string, number>()
 
   for (const doc of docsEmitidos.value) {
-    const signo = SIGNO_VENTA[doc.tipoDte] ?? 0
+    const signo = esNotaDeCompra(doc) ? 0 : (SIGNO_VENTA[doc.tipoDte] ?? 0)
     const mes = claveMes(doc.fechaEmision ?? doc.createdAt)
     if (signo !== 0) ventas.set(mes, (ventas.get(mes) ?? 0) + signo * totalClp(doc))
     if (doc.tipoDte === 46) compras.set(mes, (compras.get(mes) ?? 0) + doc.montos.total)
@@ -104,7 +108,7 @@ const evolucion = computed(() => {
 const creditosPorDocumento = computed(() => {
   const mapa = new Map<string, number>()
   for (const doc of docsEmitidos.value) {
-    if (doc.tipoDte !== 61 && doc.tipoDte !== 112) continue
+    if ((doc.tipoDte !== 61 && doc.tipoDte !== 112) || esNotaDeCompra(doc)) continue
     const ref = (doc.referencias ?? []).find((r) => typeof r.tipoDteRef === 'number' && r.tipoDteRef < 800)
     if (!ref) continue
     const clave = `${ref.tipoDteRef}-${ref.folioRef}`
@@ -149,7 +153,7 @@ const porCobrar = computed(() => {
   const porCliente = new Map<string, { nombre: string; saldo: number; vencido: number }>()
 
   for (const doc of docsEmitidos.value) {
-    if ((SIGNO_VENTA[doc.tipoDte] ?? 0) <= 0 || doc.tipoDte === 46) continue
+    if ((SIGNO_VENTA[doc.tipoDte] ?? 0) <= 0 || doc.tipoDte === 46 || esNotaDeCompra(doc)) continue
     const saldo = saldoDoc(doc)
     if (saldo <= 0) continue
     const vencimiento = vencimientoDoc(doc)
@@ -194,6 +198,12 @@ const porPagar = computed(() => {
     acumular(compra.supplierId, (esCredito ? -1 : 1) * compra.montoTotal, vencimiento)
   }
   for (const doc of docsEmitidos.value) {
+    if (esNotaDeCompra(doc)) {
+      // ND de compra suma deuda; NC de compra la rebaja.
+      const signoNota = doc.tipoDte === 61 || doc.tipoDte === 112 ? -1 : 1
+      acumular(doc.supplierId, signoNota * doc.montos.total, new Date(new Date(doc.fechaEmision ?? doc.createdAt).getTime() + PLAZO_LEGAL_DIAS * DIA_MS))
+      continue
+    }
     if (doc.tipoDte !== 46) continue
     const saldo = doc.montos.total - doc.montoPagado
     if (saldo <= 0) continue

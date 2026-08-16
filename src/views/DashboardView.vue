@@ -52,6 +52,14 @@ function signoVenta(tipoDte: number): number {
   return 1
 }
 
+// Una NC/ND que corrige una Factura de COMPRA (retencionIvaCompra) ajusta
+// la deuda con el proveedor: no es venta ni algo por cobrar — se cuenta en
+// el por pagar (encontrado en vivo: inflaba el por cobrar en el monto
+// exacto de la nota del set de certificación de compras).
+function esNotaDeCompra(doc: DteDocument): boolean {
+  return doc.retencionIvaCompra === true && doc.tipoDte !== 46
+}
+
 // Los documentos de exportación (110/111/112) llevan sus montos en la
 // MONEDA de la operación: se convierten a pesos con su tipo de cambio antes
 // de sumarlos — mezclar dólares con pesos daría tarjetas mentirosas.
@@ -79,6 +87,7 @@ const documentosDelMes = computed(() =>
     (doc) =>
       !ESTADOS_ANULADOS.includes(doc.estado) &&
       signoVenta(doc.tipoDte) !== 0 &&
+      !esNotaDeCompra(doc) &&
       isSameMonth(doc.fechaEmision ?? doc.createdAt)
   )
 )
@@ -123,7 +132,7 @@ function saldoPorCobrar(doc: DteDocument): number {
 const documentosPorCobrarList = computed(() =>
   documentosDelAmbiente.value.filter(
     (doc) =>
-      signoVenta(doc.tipoDte) > 0 && ESTADOS_EMITIDOS.includes(doc.estado) && saldoPorCobrar(doc) > 0
+      signoVenta(doc.tipoDte) > 0 && !esNotaDeCompra(doc) && ESTADOS_EMITIDOS.includes(doc.estado) && saldoPorCobrar(doc) > 0
   )
 )
 
@@ -156,12 +165,21 @@ const creditosDeCompras = computed(() =>
     .reduce((sum, purchase) => sum + purchase.montoTotal, 0)
 )
 
+// Las NC/ND que corrigen facturas de compra ajustan la deuda: la ND suma,
+// la NC resta.
+const ajusteNotasDeCompra = computed(() =>
+  documentosDelAmbiente.value
+    .filter((doc) => esNotaDeCompra(doc) && ESTADOS_EMITIDOS.includes(doc.estado))
+    .reduce((sum, doc) => sum + (doc.tipoDte === 61 || doc.tipoDte === 112 ? -1 : 1) * doc.montos.total, 0)
+)
+
 const porPagar = computed(() =>
   Math.max(
     0,
     comprasPorPagarList.value.reduce((sum, purchase) => sum + purchase.montoTotal, 0) +
       facturasDeCompraEmitidas.value.reduce((sum, doc) => sum + (doc.montos.total - doc.montoPagado), 0) -
-      creditosDeCompras.value
+      creditosDeCompras.value +
+      ajusteNotasDeCompra.value
   )
 )
 
@@ -384,6 +402,8 @@ onUnmounted(() => {
       <p class="page-subtitle">Resumen de {{ auth.currentOrganization?.razonSocial }}</p>
     </header>
 
+    <div class="grupos-fila">
+      <div class="grupo-box">
     <h2 class="grupo-titulo">Este mes</h2>
     <div class="stat-grid">
       <article v-for="stat in statsDelMes" :key="stat.label" class="stat-card surface-card">
@@ -405,7 +425,8 @@ onUnmounted(() => {
         </footer>
       </article>
     </div>
-
+      </div>
+      <div class="grupo-box">
     <h2 class="grupo-titulo">Acumulado histórico (todo lo pendiente)</h2>
     <div class="stat-grid">
       <article v-for="stat in statsAcumulado" :key="stat.label" class="stat-card surface-card">
@@ -426,6 +447,8 @@ onUnmounted(() => {
           </router-link>
         </footer>
       </article>
+    </div>
+      </div>
     </div>
 
     <section v-if="auth.hasMinRole('contador')" class="recent surface-card">
@@ -523,6 +546,8 @@ onUnmounted(() => {
 }
 
 /* ---------- Tarjetas de indicador ---------- */
+.grupos-fila { display: flex; gap: 1rem; flex-wrap: wrap; }
+.grupo-box { flex: 1; min-width: 420px; }
 .grupo-titulo {
   margin: 0 0 0.6rem;
   font-size: 0.78rem;

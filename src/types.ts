@@ -261,6 +261,10 @@ export interface DteDocument {
   items: DteItem[]
   // Solo para Liquidación-Factura (43), donde el área es obligatoria.
   comisiones?: DteComision[]
+  // Verdadero en la Factura de Compra (46) y en las NC/ND que la corrigen:
+  // esas notas ajustan la deuda con el PROVEEDOR, no las ventas — ver
+  // document.model.ts en el servidor.
+  retencionIvaCompra?: boolean
   // Descuento global (%) sobre el subtotal de ítems afectos — ver
   // document.model.ts en el servidor.
   descuentoGlobalPct?: number
