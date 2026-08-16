@@ -66,6 +66,9 @@ export interface Customer {
   ciudad?: string
   email?: string
   condicionPago?: string
+  // Plazo de pago pactado en días; sin pacto rige el default legal de 30
+  // días (Ley 21.131). Lo usa el tablero de Finanzas.
+  plazoPagoDias?: number
   // Receptor extranjero (documentos de exportación): RUT genérico
   // 55555555-5 y estos datos en la zona <Extranjero> del DTE — ver
   // customer.model.ts en el servidor. `nacionalidad` es el código de PAÍS

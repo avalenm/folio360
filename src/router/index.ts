@@ -24,6 +24,7 @@ const router = createRouter({
       component: () => import('@/layouts/AppLayout.vue'),
       children: [
         { path: '', name: 'dashboard', component: () => import('@/views/DashboardView.vue') },
+        { path: 'finanzas', name: 'finanzas', component: () => import('@/views/finanzas/FinanzasView.vue') },
         { path: 'customers', name: 'customers', component: () => import('@/views/customers/CustomersView.vue') },
         { path: 'products', name: 'products', component: () => import('@/views/products/ProductsView.vue') },
         { path: 'caf', name: 'caf', component: () => import('@/views/caf/CafView.vue'), meta: { minRole: 'admin' } },

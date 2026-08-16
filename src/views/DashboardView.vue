@@ -47,9 +47,21 @@ function isSameMonth(dateStr: string): boolean {
 //      COMPRA — es plata que se le debe al proveedor, no una venta ni algo
 //      por cobrar.
 function signoVenta(tipoDte: number): number {
-  if (tipoDte === 61) return -1
+  if (tipoDte === 61 || tipoDte === 112) return -1
   if (tipoDte === 52 || tipoDte === 46) return 0
   return 1
+}
+
+// Los documentos de exportación (110/111/112) llevan sus montos en la
+// MONEDA de la operación: se convierten a pesos con su tipo de cambio antes
+// de sumarlos — mezclar dólares con pesos daría tarjetas mentirosas.
+function totalClp(doc: DteDocument): number {
+  const cambio = [110, 111, 112].includes(doc.tipoDte) ? (doc.exportacion?.tipoCambio ?? 0) : 1
+  return Math.round(doc.montos.total * cambio)
+}
+
+function ivaClp(doc: DteDocument): number {
+  return [110, 111, 112].includes(doc.tipoDte) ? 0 : doc.montos.iva
 }
 
 // Los documentos de certificación son pruebas: no son ventas reales y no
@@ -72,10 +84,10 @@ const documentosDelMes = computed(() =>
 )
 
 const ventasDelMes = computed(() =>
-  documentosDelMes.value.reduce((sum, doc) => sum + signoVenta(doc.tipoDte) * doc.montos.total, 0)
+  documentosDelMes.value.reduce((sum, doc) => sum + signoVenta(doc.tipoDte) * totalClp(doc), 0)
 )
 const ivaDelMes = computed(() =>
-  documentosDelMes.value.reduce((sum, doc) => sum + signoVenta(doc.tipoDte) * doc.montos.iva, 0)
+  documentosDelMes.value.reduce((sum, doc) => sum + signoVenta(doc.tipoDte) * ivaClp(doc), 0)
 )
 
 // Una nota de crédito no es algo "por cobrar": rebaja lo que el cliente debe
@@ -87,7 +99,7 @@ const creditosPorDocumento = computed(() => {
   const porDocumento = new Map<string, number>()
 
   for (const doc of documentosDelAmbiente.value) {
-    if (doc.tipoDte !== 61 || !ESTADOS_EMITIDOS.includes(doc.estado)) continue
+    if ((doc.tipoDte !== 61 && doc.tipoDte !== 112) || !ESTADOS_EMITIDOS.includes(doc.estado)) continue
 
     // La primera referencia a un documento real (en certificación la primera
     // es "SET", que no apunta a ningún folio nuestro).
@@ -95,7 +107,7 @@ const creditosPorDocumento = computed(() => {
     if (!referencia) continue
 
     const clave = `${referencia.tipoDteRef}-${referencia.folioRef}`
-    porDocumento.set(clave, (porDocumento.get(clave) ?? 0) + doc.montos.total)
+    porDocumento.set(clave, (porDocumento.get(clave) ?? 0) + totalClp(doc))
   }
 
   return porDocumento
@@ -105,7 +117,7 @@ function saldoPorCobrar(doc: DteDocument): number {
   const credito = doc.folio != null ? (creditosPorDocumento.value.get(`${doc.tipoDte}-${doc.folio}`) ?? 0) : 0
   // Nunca negativo: si las notas de crédito superan lo facturado, el cliente
   // no pasa a deberte menos que cero.
-  return Math.max(0, doc.montos.total - doc.montoPagado - credito)
+  return Math.max(0, totalClp(doc) - doc.montoPagado - credito)
 }
 
 const documentosPorCobrarList = computed(() =>
@@ -152,7 +164,7 @@ const stats = computed(() => [
     value: ventasDelMes.value,
     icon: 'pi-chart-line',
     tone: 'brand',
-    hint: 'Suma de documentos emitidos este mes (excluye borradores y anulados)',
+    hint: 'Ventas netas del MES CALENDARIO en curso (facturas menos notas de crédito, por fecha de emisión). Exportaciones convertidas a pesos.',
     note: `${documentosDelMes.value.length} este mes`,
     to: '/documents',
     linkLabel: 'Ver documentos'
@@ -162,17 +174,17 @@ const stats = computed(() => [
     value: porCobrar.value,
     icon: 'pi-wallet',
     tone: 'success',
-    hint: 'Saldo pendiente de documentos emitidos',
+    hint: 'TODO lo impago histórico (sin límite de período), neto de notas de crédito y abonos — por eso puede superar a las ventas del mes. El detalle con vencimientos está en Finanzas.',
     note: `${documentosPorCobrarList.value.length} pendientes`,
     to: '/documents',
     linkLabel: 'Ver documentos'
   },
   {
-    label: 'IVA acumulado',
+    label: 'IVA débito del mes',
     value: ivaDelMes.value,
     icon: 'pi-percentage',
     tone: 'neutral',
-    hint: 'IVA de los documentos emitidos este mes',
+    hint: 'Solo el IVA de tus VENTAS del mes en curso. El IVA a pagar (débito menos crédito de compras) está en Finanzas.',
     note: '19% tasa',
     to: '/documents',
     linkLabel: 'Ver documentos'
@@ -182,7 +194,7 @@ const stats = computed(() => [
     value: porPagar.value,
     icon: 'pi-shopping-cart',
     tone: 'warning',
-    hint: 'Documentos de compra no marcados como pagados',
+    hint: 'TODO lo impago a proveedores (sin límite de período): compras registradas más facturas de compra emitidas. El detalle con vencimientos está en Finanzas.',
     note: `${comprasPorPagarList.value.length} pendientes`,
     to: '/purchases',
     linkLabel: 'Ver compras'

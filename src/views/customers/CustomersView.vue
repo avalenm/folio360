@@ -7,6 +7,7 @@ import Column from 'primevue/column'
 import Button from 'primevue/button'
 import Dialog from 'primevue/dialog'
 import InputText from 'primevue/inputtext'
+import InputNumber from 'primevue/inputnumber'
 import Menu from 'primevue/menu'
 import Select from 'primevue/select'
 import ToggleSwitch from 'primevue/toggleswitch'
@@ -305,6 +306,10 @@ onMounted(fetchAll)
         <label class="field">
           <span>Condición de pago</span>
           <InputText v-model="draft.condicionPago" />
+        </label>
+        <label class="field">
+          <span>Plazo de pago (días) — vacío = 30 (Ley 21.131)</span>
+          <InputNumber v-model="draft.plazoPagoDias" :min="0" :max="365" fluid />
         </label>
 
         <label class="field field-switch">

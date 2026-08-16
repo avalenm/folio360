@@ -26,7 +26,10 @@ interface NavItem {
 const navGroups: { label: string | null; items: NavItem[] }[] = [
   {
     label: null,
-    items: [{ to: '/', label: 'Panorama', icon: 'pi-chart-pie' }]
+    items: [
+      { to: '/', label: 'Panorama', icon: 'pi-chart-pie' },
+      { to: '/finanzas', label: 'Finanzas', icon: 'pi-wallet' }
+    ]
   },
   {
     label: 'Ventas',
