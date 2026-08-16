@@ -30,18 +30,30 @@ const ESTADOS_EMITIDOS = ['pendiente_firma', 'firmado', 'enviado', 'aceptado', '
 // no una venta propia — la venta real es solo la comisión.
 const SIGNO_VENTA: Record<number, number> = { 33: 1, 34: 1, 56: 1, 61: -1, 110: 1, 111: 1, 112: -1 }
 
-async function fetchTodo<T>(service: string): Promise<T[]> {
-  const items: T[] = []
-  let skip = 0
-  for (;;) {
-    const res = (await feathersClient
-      .service(service)
-      .find({ query: { $limit: 100, $skip: skip, $sort: { createdAt: -1 } } })) as Paginated<T> | T[]
-    const data = Array.isArray(res) ? res : res.data
-    items.push(...data)
-    if (Array.isArray(res) || data.length === 0 || items.length >= res.total) return items
-    skip += data.length
+async function fetchTodo<T>(service: string, select?: string[]): Promise<T[]> {
+  // Solo los campos que los cálculos usan: sin $select cada documento viaja
+  // con su XML firmado completo y sus ítems (~10-30 KB c/u) — varios MB para
+  // sumar cuatro números, que era lo que hacía lenta la página. La primera
+  // página revela el total y el resto se pide EN PARALELO.
+  const query = (skip: number): Record<string, unknown> => ({
+    $limit: 100,
+    $skip: skip,
+    $sort: { createdAt: -1 },
+    ...(select ? { $select: select } : {})
+  })
+
+  const primera = (await feathersClient.service(service).find({ query: query(0) })) as Paginated<T> | T[]
+  if (Array.isArray(primera)) return primera
+
+  const items = [...primera.data]
+  const pendientes: Promise<Paginated<T> | T[]>[] = []
+  for (let skip = 100; skip < primera.total; skip += 100) {
+    pendientes.push(feathersClient.service(service).find({ query: query(skip) }) as Promise<Paginated<T> | T[]>)
   }
+  for (const res of await Promise.all(pendientes)) {
+    items.push(...(Array.isArray(res) ? res : res.data))
+  }
+  return items
 }
 
 // Total del documento en PESOS: exportación se convierte con su tipo de
@@ -276,10 +288,10 @@ const AYUDA_FINANZAS: SeccionAyuda[] = [
 onMounted(async () => {
   try {
     const [docs, compras, clientes, proveedores] = await Promise.all([
-      fetchTodo<DteDocument>('documents'),
+      fetchTodo<DteDocument>('documents', ['tipoDte', 'folio', 'ambiente', 'estado', 'montos', 'montoPagado', 'fechaEmision', 'createdAt', 'referencias', 'exportacion', 'retencionIvaCompra', 'customerId', 'supplierId', 'guiaFacturada', 'trackId']),
       auth.hasMinRole('contador') ? fetchTodo<Purchase>('purchases') : Promise.resolve([]),
-      fetchTodo<Customer>('customers'),
-      fetchTodo<Supplier>('suppliers')
+      fetchTodo<Customer>('customers', ['razonSocial', 'plazoPagoDias']),
+      fetchTodo<Supplier>('suppliers', ['razonSocial'])
     ])
     documents.value = docs
     purchases.value = compras

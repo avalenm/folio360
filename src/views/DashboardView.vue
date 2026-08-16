@@ -298,24 +298,30 @@ function confirmRecepcionar(purchase: Purchase): void {
   })
 }
 
-// Trae la colección COMPLETA paginando de a 100 (el máximo del servidor).
-// Las tarjetas del Panorama suman sobre todos los documentos: pedir una
-// sola página dejaba cada tarjeta calculada sobre un subconjunto distinto
-// y los totales no cuadraban entre sí ni con las páginas de detalle
-// (encontrado en vivo con 200+ documentos acumulados).
-async function fetchColeccionCompleta<T>(service: string): Promise<T[]> {
-  const items: T[] = []
-  let skip = 0
+async function fetchColeccionCompleta<T>(service: string, select?: string[]): Promise<T[]> {
+  // Solo los campos que los cálculos usan: sin $select cada documento viaja
+  // con su XML firmado completo y sus ítems (~10-30 KB c/u) — varios MB para
+  // sumar cuatro números, que era lo que hacía lenta la página. La primera
+  // página revela el total y el resto se pide EN PARALELO.
+  const query = (skip: number): Record<string, unknown> => ({
+    $limit: 100,
+    $skip: skip,
+    $sort: { createdAt: -1 },
+    ...(select ? { $select: select } : {})
+  })
 
-  for (;;) {
-    const res = (await feathersClient
-      .service(service)
-      .find({ query: { $limit: 100, $skip: skip, $sort: { createdAt: -1 } } })) as Paginated<T> | T[]
-    const data = Array.isArray(res) ? res : res.data
-    items.push(...data)
-    if (Array.isArray(res) || data.length === 0 || items.length >= res.total) return items
-    skip += data.length
+  const primera = (await feathersClient.service(service).find({ query: query(0) })) as Paginated<T> | T[]
+  if (Array.isArray(primera)) return primera
+
+  const items = [...primera.data]
+  const pendientes: Promise<Paginated<T> | T[]>[] = []
+  for (let skip = 100; skip < primera.total; skip += 100) {
+    pendientes.push(feathersClient.service(service).find({ query: query(skip) }) as Promise<Paginated<T> | T[]>)
   }
+  for (const res of await Promise.all(pendientes)) {
+    items.push(...(Array.isArray(res) ? res : res.data))
+  }
+  return items
 }
 
 async function refreshPurchases(): Promise<void> {
@@ -330,7 +336,7 @@ onMounted(async () => {
     // llamada rechazada. Se omiten directamente: esas secciones simplemente
     // no aplican a ese rol.
     const [documentsResult, purchasesResult, suppliersResult, incomingResult] = await Promise.all([
-      fetchColeccionCompleta<DteDocument>('documents'),
+      fetchColeccionCompleta<DteDocument>('documents', ['tipoDte', 'folio', 'ambiente', 'estado', 'montos', 'montoPagado', 'fechaEmision', 'createdAt', 'referencias', 'exportacion', 'retencionIvaCompra', 'customerId', 'supplierId', 'guiaFacturada', 'trackId']),
       auth.hasMinRole('contador') ? fetchColeccionCompleta<Purchase>('purchases') : Promise.resolve([]),
       fetchColeccionCompleta<Supplier>('suppliers'),
       auth.hasMinRole('contador')
