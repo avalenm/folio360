@@ -26,7 +26,9 @@ const ESTADOS_EMITIDOS = ['pendiente_firma', 'firmado', 'enviado', 'aceptado', '
 // Ventas (+): factura, exenta, liquidación, factura y ND de exportación, ND.
 // Restan (−): notas de crédito. La guía (52) no es venta por sí sola y la
 // factura de compra (46) es deuda con el proveedor, no venta.
-const SIGNO_VENTA: Record<number, number> = { 33: 1, 34: 1, 43: 1, 56: 1, 61: -1, 110: 1, 111: 1, 112: -1 }
+// La Liquidación (43) queda NEUTRA: su total es la rendición al mandante,
+// no una venta propia — la venta real es solo la comisión.
+const SIGNO_VENTA: Record<number, number> = { 33: 1, 34: 1, 56: 1, 61: -1, 110: 1, 111: 1, 112: -1 }
 
 async function fetchTodo<T>(service: string): Promise<T[]> {
   const items: T[] = []
@@ -88,6 +90,11 @@ const evolucion = computed(() => {
     const mes = claveMes(doc.fechaEmision ?? doc.createdAt)
     if (signo !== 0) ventas.set(mes, (ventas.get(mes) ?? 0) + signo * totalClp(doc))
     if (doc.tipoDte === 46) compras.set(mes, (compras.get(mes) ?? 0) + doc.montos.total)
+    // Las NC/ND que corrigen facturas de compra ajustan las compras del mes.
+    if (esNotaDeCompra(doc)) {
+      const signoNota = doc.tipoDte === 61 || doc.tipoDte === 112 ? -1 : 1
+      compras.set(mes, (compras.get(mes) ?? 0) + signoNota * doc.montos.total)
+    }
   }
   for (const compra of purchases.value) {
     if (compra.tipoDocumento === 'factura_compra') continue // ya contada como DTE 46
@@ -260,6 +267,7 @@ const AYUDA_FINANZAS: SeccionAyuda[] = [
       { nombre: 'Notas de crédito', descripcion: 'Rebajan el saldo de la factura que referencian, no cuentan como línea aparte.' },
       { nombre: 'Exportaciones', descripcion: 'Se convierten a pesos con el tipo de cambio del documento.' },
       { nombre: 'IVA estimado', descripcion: 'Débito (ventas del mes) menos crédito (compras del mes): lo que se pagaría en el F29. Es referencial — el definitivo depende de los tratamientos de IVA de cada compra.' },
+      { nombre: 'Liquidaciones (43)', descripcion: 'No se cuentan como venta ni cobranza: su total es la rendición al mandante, no ingreso propio.' },
       { nombre: 'Posición neta', descripcion: 'Por cobrar menos por pagar: el capital de trabajo que tienes en la calle.' }
     ]
   }

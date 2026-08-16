@@ -48,7 +48,10 @@ function isSameMonth(dateStr: string): boolean {
 //      por cobrar.
 function signoVenta(tipoDte: number): number {
   if (tipoDte === 61 || tipoDte === 112) return -1
-  if (tipoDte === 52 || tipoDte === 46) return 0
+  // La Liquidación-Factura (43) tampoco: su total es lo que un mandatario
+  // le rinde al mandante (la venta propia es solo la comisión) — contarla
+  // como venta y como cobrable inflaría ambos lados.
+  if (tipoDte === 52 || tipoDte === 46 || tipoDte === 43) return 0
   return 1
 }
 
