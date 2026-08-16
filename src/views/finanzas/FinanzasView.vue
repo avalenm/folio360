@@ -204,6 +204,9 @@ const porPagar = computed(() => {
   return { aging, ranking }
 })
 
+// El mes en curso es la última columna de la evolución.
+const mesActual = computed(() => evolucion.value[evolucion.value.length - 1])
+
 const posicionNeta = computed(() => porCobrar.value.aging.total - porPagar.value.aging.total)
 
 // ---- IVA estimado del mes (débito − crédito) ----
@@ -276,6 +279,31 @@ onMounted(async () => {
     <p v-if="loading" class="cargando">Calculando…</p>
 
     <template v-else>
+      <h2 class="grupo-titulo">Este mes</h2>
+      <div class="tarjetas">
+        <div class="tarjeta">
+          <span class="etiqueta">Ventas netas</span>
+          <span class="valor">${{ fm(mesActual.ventas) }}</span>
+          <span class="detalle">mes en curso, por fecha de emisión</span>
+        </div>
+        <div class="tarjeta">
+          <span class="etiqueta">Compras</span>
+          <span class="valor">${{ fm(mesActual.compras) }}</span>
+          <span class="detalle">mes en curso</span>
+        </div>
+        <div class="tarjeta">
+          <span class="etiqueta">Margen</span>
+          <span class="valor" :class="mesActual.margen >= 0 ? 'positivo' : 'negativo'">${{ fm(mesActual.margen) }}</span>
+          <span class="detalle">ventas − compras</span>
+        </div>
+        <div class="tarjeta">
+          <span class="etiqueta">IVA estimado del mes</span>
+          <span class="valor">${{ fm(ivaMes.neto) }}</span>
+          <span class="detalle">débito ${{ fm(ivaMes.debito) }} − crédito ${{ fm(ivaMes.credito) }}</span>
+        </div>
+      </div>
+
+      <h2 class="grupo-titulo">Acumulado histórico (todo lo pendiente)</h2>
       <div class="tarjetas">
         <div class="tarjeta">
           <span class="etiqueta">Por cobrar (total)</span>
@@ -291,11 +319,6 @@ onMounted(async () => {
           <span class="etiqueta">Posición neta</span>
           <span class="valor" :class="posicionNeta >= 0 ? 'positivo' : 'negativo'">${{ fm(posicionNeta) }}</span>
           <span class="detalle">por cobrar − por pagar</span>
-        </div>
-        <div class="tarjeta">
-          <span class="etiqueta">IVA estimado del mes</span>
-          <span class="valor">${{ fm(ivaMes.neto) }}</span>
-          <span class="detalle">débito ${{ fm(ivaMes.debito) }} − crédito ${{ fm(ivaMes.credito) }}</span>
         </div>
       </div>
 
@@ -372,6 +395,7 @@ onMounted(async () => {
 <style scoped>
 .page-title { margin: 0 0 1.25rem; font-size: 1.4rem; }
 .cargando { color: var(--text-secondary, #64748b); }
+.grupo-titulo { margin: 0 0 0.6rem; font-size: 0.78rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #64748b; }
 .tarjetas { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin-bottom: 1rem; }
 .tarjeta { background: #fff; border-radius: 10px; padding: 1.1rem 1.25rem; display: flex; flex-direction: column; gap: 0.3rem; }
 .etiqueta { font-size: 0.8rem; color: #64748b; font-weight: 600; }
