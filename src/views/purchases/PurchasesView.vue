@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AyudaPagina from '@/components/AyudaPagina.vue'
+import { AYUDA_COMPRAS } from '@/ayudaContenidos'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
@@ -501,7 +503,7 @@ onMounted(async () => {
 <template>
   <div>
     <div class="page-header">
-      <h1 class="page-title">Compras</h1>
+      <h1 class="page-title">Compras <AyudaPagina titulo="Compras" :secciones="AYUDA_COMPRAS" /></h1>
       <Button label="Nuevo documento" icon="pi pi-plus" @click="openCreate" />
     </div>
 

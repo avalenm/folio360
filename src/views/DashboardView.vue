@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AyudaPagina from '@/components/AyudaPagina.vue'
+import { AYUDA_PANORAMA } from '@/ayudaContenidos'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import Button from 'primevue/button'
 import { useConfirm } from 'primevue/useconfirm'
@@ -345,7 +347,7 @@ onUnmounted(() => {
 <template>
   <div class="dashboard">
     <header class="dash-header">
-      <h1 class="page-title">Panorama</h1>
+      <h1 class="page-title">Panorama <AyudaPagina titulo="Panorama" :secciones="AYUDA_PANORAMA" /></h1>
       <p class="page-subtitle">Resumen de {{ auth.currentOrganization?.razonSocial }}</p>
     </header>
 

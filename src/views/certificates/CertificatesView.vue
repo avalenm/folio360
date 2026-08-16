@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AyudaPagina from '@/components/AyudaPagina.vue'
+import { AYUDA_CERTIFICADOS } from '@/ayudaContenidos'
 import { onMounted, reactive, ref } from 'vue'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
@@ -114,7 +116,7 @@ onMounted(fetchAll)
 <template>
   <div>
     <div class="page-header">
-      <h1 class="page-title">Certificados digitales</h1>
+      <h1 class="page-title">Certificados digitales <AyudaPagina titulo="Certificados" :secciones="AYUDA_CERTIFICADOS" /></h1>
       <Button label="Cargar certificado" icon="pi pi-plus" @click="openCreate" />
     </div>
 

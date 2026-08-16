@@ -18,6 +18,8 @@ import { useResource } from '@/composables/useResource'
 import { useAuthStore } from '@/stores/auth'
 import { feathersClient } from '@/services/feathers'
 import FacturaPreview from './FacturaPreview.vue'
+import AyudaPagina from '@/components/AyudaPagina.vue'
+import { AYUDA_DOCUMENTOS } from './ayuda-documentos.js'
 import type { Customer, DteDocument, DteExportacion, DteItem, DtePago, Product, Supplier, ValorUf } from '@/types'
 import { TIPOS_DTE_EMITIBLES, nombreCortoTipoDte, tipoDteCorto, tipoDteLabel } from '@/tiposDte'
 import {
@@ -1355,7 +1357,7 @@ onMounted(async () => {
 <template>
   <div>
     <div class="page-header">
-      <h1 class="page-title">Documentos</h1>
+      <h1 class="page-title">Documentos <AyudaPagina titulo="Documentos" :secciones="AYUDA_DOCUMENTOS" /></h1>
       <Button label="Nuevo documento" icon="pi pi-plus" @click="openCreate" />
     </div>
 

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AyudaPagina from '@/components/AyudaPagina.vue'
+import { AYUDA_CASILLA } from '@/ayudaContenidos'
 import { onMounted, reactive, ref } from 'vue'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
@@ -136,7 +138,7 @@ onMounted(fetchCurrent)
 <template>
   <div>
     <div class="page-header">
-      <h1 class="page-title">Casilla de Intercambio</h1>
+      <h1 class="page-title">Casilla de Intercambio <AyudaPagina titulo="Casilla de Intercambio" :secciones="AYUDA_CASILLA" /></h1>
     </div>
 
     <p class="page-hint">

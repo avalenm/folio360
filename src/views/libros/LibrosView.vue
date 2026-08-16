@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AyudaPagina from '@/components/AyudaPagina.vue'
+import { AYUDA_LIBROS } from '@/ayudaContenidos'
 import { computed, ref, watch } from 'vue'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
@@ -191,7 +193,7 @@ function descargar(): void {
 <template>
   <div>
     <div class="page-header">
-      <h1 class="page-title">Libros electrónicos</h1>
+      <h1 class="page-title">Libros electrónicos <AyudaPagina titulo="Libros" :secciones="AYUDA_LIBROS" /></h1>
     </div>
 
     <p class="page-hint">

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AyudaPagina from '@/components/AyudaPagina.vue'
+import { AYUDA_ORGANIZACIONES } from '@/ayudaContenidos'
 import { reactive, ref } from 'vue'
 import Button from 'primevue/button'
 import Dialog from 'primevue/dialog'
@@ -93,7 +95,7 @@ async function handleSave(): Promise<void> {
 
 <template>
   <div>
-    <h1 class="page-title">Mis organizaciones</h1>
+    <h1 class="page-title">Mis organizaciones <AyudaPagina titulo="Organizaciones" :secciones="AYUDA_ORGANIZACIONES" /></h1>
 
     <div class="org-grid">
       <div v-for="org in auth.organizations" :key="org._id" class="org-card">

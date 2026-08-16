@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AyudaPagina from '@/components/AyudaPagina.vue'
+import { AYUDA_MIEMBROS } from '@/ayudaContenidos'
 import { computed, onMounted, reactive, ref } from 'vue'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
@@ -206,7 +208,7 @@ onMounted(fetchAll)
 <template>
   <div>
     <div class="page-header">
-      <h1 class="page-title">Miembros</h1>
+      <h1 class="page-title">Miembros <AyudaPagina titulo="Miembros" :secciones="AYUDA_MIEMBROS" /></h1>
       <Button v-if="canManage" label="Invitar miembro" icon="pi pi-user-plus" @click="openInvite" />
     </div>
 

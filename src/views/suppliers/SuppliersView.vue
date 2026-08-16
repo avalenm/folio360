@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AyudaPagina from '@/components/AyudaPagina.vue'
+import { AYUDA_PROVEEDORES } from '@/ayudaContenidos'
 import { computed, onMounted, reactive, ref } from 'vue'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
@@ -186,7 +188,7 @@ onMounted(fetchAll)
 <template>
   <div>
     <div class="page-header">
-      <h1 class="page-title">Proveedores</h1>
+      <h1 class="page-title">Proveedores <AyudaPagina titulo="Proveedores" :secciones="AYUDA_PROVEEDORES" /></h1>
       <Button label="Nuevo proveedor" icon="pi pi-plus" @click="openCreate" />
     </div>
 

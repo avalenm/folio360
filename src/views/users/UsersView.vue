@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AyudaPagina from '@/components/AyudaPagina.vue'
+import { AYUDA_USUARIOS } from '@/ayudaContenidos'
 import { reactive, ref } from 'vue'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
@@ -46,7 +48,7 @@ async function handleSave(): Promise<void> {
 
 <template>
   <div>
-    <h1 class="page-title">Mi perfil</h1>
+    <h1 class="page-title">Mi perfil <AyudaPagina titulo="Usuarios" :secciones="AYUDA_USUARIOS" /></h1>
 
     <form class="profile-card" @submit.prevent="handleSave">
       <label class="field">

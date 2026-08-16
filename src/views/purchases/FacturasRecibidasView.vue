@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AyudaPagina from '@/components/AyudaPagina.vue'
+import { AYUDA_FACTURAS_RECIBIDAS } from '@/ayudaContenidos'
 import { computed, onMounted, ref } from 'vue'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
@@ -168,7 +170,7 @@ onMounted(async () => {
 <template>
   <div>
     <div class="page-header">
-      <h1 class="page-title">Facturas recibidas</h1>
+      <h1 class="page-title">Facturas recibidas <AyudaPagina titulo="Facturas recibidas" :secciones="AYUDA_FACTURAS_RECIBIDAS" /></h1>
     </div>
 
     <p class="page-hint">
