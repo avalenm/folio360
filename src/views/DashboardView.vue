@@ -247,11 +247,28 @@ function confirmRecepcionar(purchase: Purchase): void {
   })
 }
 
+// Trae la colección COMPLETA paginando de a 100 (el máximo del servidor).
+// Las tarjetas del Panorama suman sobre todos los documentos: pedir una
+// sola página dejaba cada tarjeta calculada sobre un subconjunto distinto
+// y los totales no cuadraban entre sí ni con las páginas de detalle
+// (encontrado en vivo con 200+ documentos acumulados).
+async function fetchColeccionCompleta<T>(service: string): Promise<T[]> {
+  const items: T[] = []
+  let skip = 0
+
+  for (;;) {
+    const res = (await feathersClient
+      .service(service)
+      .find({ query: { $limit: 100, $skip: skip, $sort: { createdAt: -1 } } })) as Paginated<T> | T[]
+    const data = Array.isArray(res) ? res : res.data
+    items.push(...data)
+    if (Array.isArray(res) || data.length === 0 || items.length >= res.total) return items
+    skip += data.length
+  }
+}
+
 async function refreshPurchases(): Promise<void> {
-  const result = (await feathersClient
-    .service('purchases')
-    .find({ query: { $limit: 200, $sort: { createdAt: -1 } } })) as Paginated<Purchase> | Purchase[]
-  purchases.value = Array.isArray(result) ? result : result.data
+  purchases.value = await fetchColeccionCompleta<Purchase>('purchases')
 }
 
 onMounted(async () => {
@@ -261,32 +278,18 @@ onMounted(async () => {
     // todo el Promise.all (incluyendo documents/suppliers) por una sola
     // llamada rechazada. Se omiten directamente: esas secciones simplemente
     // no aplican a ese rol.
-    const requests: [
-      Promise<Paginated<DteDocument> | DteDocument[]>,
-      Promise<Paginated<Purchase> | Purchase[]>,
-      Promise<Paginated<Supplier> | Supplier[]>,
-      Promise<Paginated<IncomingInvoice> | IncomingInvoice[]>
-    ] = [
-      feathersClient.service('documents').find({ query: { $limit: 200, $sort: { createdAt: -1 } } }) as Promise<
-        Paginated<DteDocument> | DteDocument[]
-      >,
+    const [documentsResult, purchasesResult, suppliersResult, incomingResult] = await Promise.all([
+      fetchColeccionCompleta<DteDocument>('documents'),
+      auth.hasMinRole('contador') ? fetchColeccionCompleta<Purchase>('purchases') : Promise.resolve([]),
+      fetchColeccionCompleta<Supplier>('suppliers'),
       auth.hasMinRole('contador')
-        ? (feathersClient.service('purchases').find({ query: { $limit: 200, $sort: { createdAt: -1 } } }) as Promise<
-            Paginated<Purchase> | Purchase[]
-          >)
-        : Promise.resolve([]),
-      feathersClient.service('suppliers').find({ query: { $limit: 200 } }) as Promise<Paginated<Supplier> | Supplier[]>,
-      auth.hasMinRole('contador')
-        ? (feathersClient.service('incoming-invoices').find({ query: { $limit: 200 } }) as Promise<
-            Paginated<IncomingInvoice> | IncomingInvoice[]
-          >)
+        ? fetchColeccionCompleta<IncomingInvoice>('incoming-invoices')
         : Promise.resolve([])
-    ]
-    const [documentsResult, purchasesResult, suppliersResult, incomingResult] = await Promise.all(requests)
-    documents.value = Array.isArray(documentsResult) ? documentsResult : documentsResult.data
-    purchases.value = Array.isArray(purchasesResult) ? purchasesResult : purchasesResult.data
-    suppliers.value = Array.isArray(suppliersResult) ? suppliersResult : suppliersResult.data
-    incomingInvoices.value = Array.isArray(incomingResult) ? incomingResult : incomingResult.data
+    ])
+    documents.value = documentsResult
+    purchases.value = purchasesResult
+    suppliers.value = suppliersResult
+    incomingInvoices.value = incomingResult
   } finally {
     loading.value = false
   }
