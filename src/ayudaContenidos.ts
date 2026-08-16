@@ -10,6 +10,14 @@ export const AYUDA_PANORAMA: SeccionAyuda[] = [
     texto: 'El resumen del mes: ventas, cuentas por cobrar, IVA acumulado (débito de tus ventas) y facturas por pagar, más los accesos rápidos a lo pendiente.'
   },
   {
+    titulo: 'Cómo se calcula',
+    items: [
+      { nombre: 'Facturas por pagar', descripcion: 'Suma DOS cosas: las compras que registraste (página Compras) y las facturas de compra que emitiste tú por cambio de sujeto, que viven en Documentos. Por eso el total puede ser mayor que lo que ves en Compras. El desglose documento por documento está en Finanzas.' },
+      { nombre: 'Por cobrar', descripcion: 'Todo lo impago histórico, neto de notas de crédito y abonos — no se limita al mes, por eso puede superar a las ventas del mes.' },
+      { nombre: 'Certificación', descripcion: 'Lo emitido y comprado en el ambiente de certificación es de prueba y nunca se suma a los números de producción.' }
+    ]
+  },
+  {
     titulo: 'Listas de acción',
     items: [
       { nombre: 'Facturas recibidas', descripcion: 'Documentos que llegaron a tu casilla y nadie ha revisado. "Revisar" abre la bandeja para confirmarlos o descartarlos.' },

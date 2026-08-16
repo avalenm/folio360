@@ -7,7 +7,17 @@ import { useConfirm } from 'primevue/useconfirm'
 import { useToast } from 'primevue/usetoast'
 import { feathersClient } from '@/services/feathers'
 import { useAuthStore } from '@/stores/auth'
-import type { DteDocument, IncomingInvoice, Paginated, Purchase, Supplier } from '@/types'
+import type { Customer, DteDocument, IncomingInvoice, Paginated, Purchase, Supplier } from '@/types'
+import {
+  documentosVigentes,
+  esNotaDeCompra,
+  ivaClp,
+  lineasPorCobrar,
+  lineasPorPagar,
+  signoVenta,
+  totalClp,
+  totalDe
+} from '@/cuentas'
 
 const auth = useAuthStore()
 const confirm = useConfirm()
@@ -15,6 +25,7 @@ const toast = useToast()
 const documents = ref<DteDocument[]>([])
 const purchases = ref<Purchase[]>([])
 const suppliers = ref<Supplier[]>([])
+const customers = ref<Customer[]>([])
 const incomingInvoices = ref<IncomingInvoice[]>([])
 const loading = ref(true)
 
@@ -25,70 +36,27 @@ const tipoDteLabel: Record<number, string> = {
   61: 'Nota de crédito'
 }
 
-const ESTADOS_EMITIDOS = ['pendiente_firma', 'firmado', 'enviado', 'aceptado', 'reparo']
-const ESTADOS_ANULADOS = ['draft', 'rechazado', 'anulado']
-
 function isSameMonth(dateStr: string): boolean {
   const date = new Date(dateStr)
   const now = new Date()
   return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth()
 }
 
-// Cuánto aporta cada tipo de documento a las ventas del período:
-//
-//  +1  Factura (33), Factura Exenta (34) y Nota de Débito (56): la nota de
-//      débito aumenta lo facturado.
-//  -1  Nota de Crédito (61): rebaja una venta ya emitida (devolución,
-//      descuento o anulación), así que RESTA. Sumarla infla las ventas, el
-//      IVA y la cobranza al mismo tiempo.
-//   0  Guía de Despacho (52): no es una venta tributaria. La venta la
-//      documenta la factura que la respalda; contar ambas duplicaría.
-//   0  Factura de Compra (46): la emitimos nosotros, pero documenta una
-//      COMPRA — es plata que se le debe al proveedor, no una venta ni algo
-//      por cobrar.
-function signoVenta(tipoDte: number): number {
-  if (tipoDte === 61 || tipoDte === 112) return -1
-  // La Liquidación-Factura (43) tampoco: su total es lo que un mandatario
-  // le rinde al mandante (la venta propia es solo la comisión) — contarla
-  // como venta y como cobrable inflaría ambos lados.
-  if (tipoDte === 52 || tipoDte === 46 || tipoDte === 43) return 0
-  return 1
-}
-
-// Una NC/ND que corrige una Factura de COMPRA (retencionIvaCompra) ajusta
-// la deuda con el proveedor: no es venta ni algo por cobrar — se cuenta en
-// el por pagar (encontrado en vivo: inflaba el por cobrar en el monto
-// exacto de la nota del set de certificación de compras).
-function esNotaDeCompra(doc: DteDocument): boolean {
-  return doc.retencionIvaCompra === true && doc.tipoDte !== 46
-}
-
-// Los documentos de exportación (110/111/112) llevan sus montos en la
-// MONEDA de la operación: se convierten a pesos con su tipo de cambio antes
-// de sumarlos — mezclar dólares con pesos daría tarjetas mentirosas.
-function totalClp(doc: DteDocument): number {
-  const cambio = [110, 111, 112].includes(doc.tipoDte) ? (doc.exportacion?.tipoCambio ?? 0) : 1
-  return Math.round(doc.montos.total * cambio)
-}
-
-function ivaClp(doc: DteDocument): number {
-  return [110, 111, 112].includes(doc.tipoDte) ? 0 : doc.montos.iva
-}
-
-// Los documentos de certificación son pruebas: no son ventas reales y no
-// pueden mezclarse con las de producción. Se muestran solo los del ambiente
-// en que está la organización, igual que hace el Libro de Ventas.
-const documentosDelAmbiente = computed(() =>
-  documents.value.filter((doc) => doc.ambiente === auth.currentOrganization?.ambiente)
+// La base de TODAS las cifras de esta pantalla: los documentos emitidos del
+// ambiente en que está la organización (los de certificación son pruebas y no
+// pueden mezclarse con los de producción). Lo decide cuentas.ts, la misma
+// función que usa Finanzas, para que las dos pantallas no puedan volver a
+// mostrar totales distintos.
+const documentosEmitidos = computed(() =>
+  documentosVigentes(documents.value, auth.currentOrganization?.ambiente)
 )
 
 // El período tributario lo marca la fecha de EMISIÓN, no cuándo se creó el
 // borrador: un documento preparado a fin de mes y emitido al mes siguiente
 // pertenece al mes en que se emitió.
 const documentosDelMes = computed(() =>
-  documentosDelAmbiente.value.filter(
+  documentosEmitidos.value.filter(
     (doc) =>
-      !ESTADOS_ANULADOS.includes(doc.estado) &&
       signoVenta(doc.tipoDte) !== 0 &&
       !esNotaDeCompra(doc) &&
       isSameMonth(doc.fechaEmision ?? doc.createdAt)
@@ -102,89 +70,14 @@ const ivaDelMes = computed(() =>
   documentosDelMes.value.reduce((sum, doc) => sum + signoVenta(doc.tipoDte) * ivaClp(doc), 0)
 )
 
-// Una nota de crédito no es algo "por cobrar": rebaja lo que el cliente debe
-// por OTRO documento. Se descuenta del saldo de la factura que referencia, no
-// como una línea suelta — si se restara por su cuenta, seguiría restando para
-// siempre incluso después de que la factura quedó pagada, y la cobranza
-// terminaría en negativo.
-const creditosPorDocumento = computed(() => {
-  const porDocumento = new Map<string, number>()
+// Por cobrar y por pagar, línea por línea: cada peso del total viene de un
+// documento concreto, y las reglas de cuál suma y cuál resta viven todas en
+// cuentas.ts.
+const cobrar = computed(() => lineasPorCobrar(documentosEmitidos.value, customers.value))
+const pagar = computed(() => lineasPorPagar(documentosEmitidos.value, purchases.value, suppliers.value))
 
-  for (const doc of documentosDelAmbiente.value) {
-    if ((doc.tipoDte !== 61 && doc.tipoDte !== 112) || !ESTADOS_EMITIDOS.includes(doc.estado)) continue
-
-    // La primera referencia a un documento real (en certificación la primera
-    // es "SET", que no apunta a ningún folio nuestro).
-    const referencia = (doc.referencias ?? []).find((ref) => typeof ref.tipoDteRef === 'number' && ref.tipoDteRef < 800)
-    if (!referencia) continue
-
-    const clave = `${referencia.tipoDteRef}-${referencia.folioRef}`
-    porDocumento.set(clave, (porDocumento.get(clave) ?? 0) + totalClp(doc))
-  }
-
-  return porDocumento
-})
-
-function saldoPorCobrar(doc: DteDocument): number {
-  const credito = doc.folio != null ? (creditosPorDocumento.value.get(`${doc.tipoDte}-${doc.folio}`) ?? 0) : 0
-  // Nunca negativo: si las notas de crédito superan lo facturado, el cliente
-  // no pasa a deberte menos que cero.
-  return Math.max(0, totalClp(doc) - doc.montoPagado - credito)
-}
-
-const documentosPorCobrarList = computed(() =>
-  documentosDelAmbiente.value.filter(
-    (doc) =>
-      signoVenta(doc.tipoDte) > 0 && !esNotaDeCompra(doc) && ESTADOS_EMITIDOS.includes(doc.estado) && saldoPorCobrar(doc) > 0
-  )
-)
-
-const porCobrar = computed(() => documentosPorCobrarList.value.reduce((sum, doc) => sum + saldoPorCobrar(doc), 0))
-
-// Una Factura de Compra (46) la emitimos nosotros, pero documenta una compra:
-// es deuda con el proveedor. Se cuenta acá, no en las ventas.
-//
-// Para que no se cuente dos veces, se excluyen las compras registradas a mano
-// como 'factura_compra': son el mismo documento cargado por el otro lado. La
-// fuente que manda es el DTE emitido, que es el documento tributario real.
-const facturasDeCompraEmitidas = computed(() =>
-  documentosDelAmbiente.value.filter(
-    (doc) => doc.tipoDte === 46 && doc.montoPagado < doc.montos.total && ESTADOS_EMITIDOS.includes(doc.estado)
-  )
-)
-
-// Una nota de crédito de un proveedor REBAJA lo que le debes — va con
-// signo negativo, no como una deuda más (antes se sumaba y el total del
-// Panorama no calzaba con Finanzas, encontrado en vivo).
-const comprasPorPagarList = computed(() =>
-  purchases.value.filter(
-    (purchase) => !purchase.pagado && purchase.tipoDocumento !== 'factura_compra' && purchase.tipoDocumento !== 'nota_credito'
-  )
-)
-
-const creditosDeCompras = computed(() =>
-  purchases.value
-    .filter((purchase) => purchase.tipoDocumento === 'nota_credito')
-    .reduce((sum, purchase) => sum + purchase.montoTotal, 0)
-)
-
-// Las NC/ND que corrigen facturas de compra ajustan la deuda: la ND suma,
-// la NC resta.
-const ajusteNotasDeCompra = computed(() =>
-  documentosDelAmbiente.value
-    .filter((doc) => esNotaDeCompra(doc) && ESTADOS_EMITIDOS.includes(doc.estado))
-    .reduce((sum, doc) => sum + (doc.tipoDte === 61 || doc.tipoDte === 112 ? -1 : 1) * doc.montos.total, 0)
-)
-
-const porPagar = computed(() =>
-  Math.max(
-    0,
-    comprasPorPagarList.value.reduce((sum, purchase) => sum + purchase.montoTotal, 0) +
-      facturasDeCompraEmitidas.value.reduce((sum, doc) => sum + (doc.montos.total - doc.montoPagado), 0) -
-      creditosDeCompras.value +
-      ajusteNotasDeCompra.value
-  )
-)
+const porCobrar = computed(() => totalDe(cobrar.value))
+const porPagar = computed(() => totalDe(pagar.value))
 
 function formatCurrency(value: number): string {
   return value.toLocaleString('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 })
@@ -223,8 +116,8 @@ const statsAcumulado = computed(() => [
     value: porCobrar.value,
     icon: 'pi-wallet',
     tone: 'success',
-    hint: 'TODO lo impago histórico (sin límite de período), neto de notas de crédito y abonos — por eso puede superar a las ventas del mes. El detalle con vencimientos está en Finanzas.',
-    note: `${documentosPorCobrarList.value.length} pendientes`,
+    hint: 'TODO lo impago histórico (sin límite de período), neto de notas de crédito y abonos — por eso puede superar a las ventas del mes. El detalle documento por documento está en Finanzas.',
+    note: `${cobrar.value.length} documentos`,
     to: '/finanzas',
     linkLabel: 'Ver en Finanzas'
   },
@@ -233,8 +126,12 @@ const statsAcumulado = computed(() => [
     value: porPagar.value,
     icon: 'pi-shopping-cart',
     tone: 'warning',
-    hint: 'TODO lo impago a proveedores (sin límite de período): compras registradas más facturas de compra emitidas. El detalle con vencimientos está en Finanzas.',
-    note: `${comprasPorPagarList.value.length} pendientes`,
+    // El conteo cuenta TODAS las líneas del total, no solo las compras: decir
+    // "4 pendientes" al lado de un total que incluye además las facturas de
+    // compra emitidas es lo que hacía imposible cuadrar el número contra la
+    // página de Compras.
+    hint: 'TODO lo impago a proveedores (sin límite de período): las compras registradas MÁS las facturas de compra que emitiste tú (esas viven en Documentos, no en Compras). El detalle documento por documento está en Finanzas.',
+    note: `${pagar.value.length} documentos`,
     to: '/finanzas',
     linkLabel: 'Ver en Finanzas'
   }
@@ -335,10 +232,13 @@ onMounted(async () => {
     // todo el Promise.all (incluyendo documents/suppliers) por una sola
     // llamada rechazada. Se omiten directamente: esas secciones simplemente
     // no aplican a ese rol.
-    const [documentsResult, purchasesResult, suppliersResult, incomingResult] = await Promise.all([
+    const [documentsResult, purchasesResult, suppliersResult, customersResult, incomingResult] = await Promise.all([
       fetchColeccionCompleta<DteDocument>('documents', ['tipoDte', 'folio', 'ambiente', 'estado', 'montos', 'montoPagado', 'fechaEmision', 'createdAt', 'referencias', 'exportacion', 'retencionIvaCompra', 'customerId', 'supplierId', 'guiaFacturada', 'trackId']),
       auth.hasMinRole('contador') ? fetchColeccionCompleta<Purchase>('purchases') : Promise.resolve([]),
       fetchColeccionCompleta<Supplier>('suppliers'),
+      // Solo lo que las cuentas por cobrar necesitan de cada cliente: el
+      // nombre para mostrar y su plazo de pago para el vencimiento.
+      fetchColeccionCompleta<Customer>('customers', ['razonSocial', 'plazoPagoDias']),
       auth.hasMinRole('contador')
         ? fetchColeccionCompleta<IncomingInvoice>('incoming-invoices')
         : Promise.resolve([])
@@ -346,6 +246,7 @@ onMounted(async () => {
     documents.value = documentsResult
     purchases.value = purchasesResult
     suppliers.value = suppliersResult
+    customers.value = customersResult
     incomingInvoices.value = incomingResult
   } finally {
     loading.value = false

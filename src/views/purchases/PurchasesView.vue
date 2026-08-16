@@ -17,6 +17,7 @@ import type { MenuItem } from 'primevue/menuitem'
 import { useConfirm } from 'primevue/useconfirm'
 import { useToast } from 'primevue/usetoast'
 import { useResource } from '@/composables/useResource'
+import { NOMBRE_TIPO_COMPRA } from '@/cuentas'
 import { feathersClient } from '@/services/feathers'
 import type {
   Purchase,
@@ -32,21 +33,14 @@ const { items: suppliers, fetchAll: fetchSuppliers } = useResource<Supplier>('su
 const confirm = useConfirm()
 const toast = useToast()
 
-const tiposDocumento: { label: string; value: PurchaseTipoDocumento }[] = [
-  { label: 'Factura', value: 'factura' },
-  { label: 'Boleta', value: 'boleta' },
-  { label: 'Nota de crédito', value: 'nota_credito' },
-  { label: 'Nota de débito', value: 'nota_debito' },
-  { label: 'Factura de compra', value: 'factura_compra' }
-]
+// Los nombres salen de cuentas.ts, que nombra estas mismas compras en el
+// desglose del "Por pagar" de Finanzas: una sola lista para que el mismo
+// documento no se llame distinto según la pantalla.
+const tipoDocumentoLabel = NOMBRE_TIPO_COMPRA
 
-const tipoDocumentoLabel: Record<PurchaseTipoDocumento, string> = {
-  factura: 'Factura',
-  boleta: 'Boleta',
-  nota_credito: 'Nota de crédito',
-  nota_debito: 'Nota de débito',
-  factura_compra: 'Factura de compra'
-}
+const tiposDocumento: { label: string; value: PurchaseTipoDocumento }[] = (
+  Object.entries(NOMBRE_TIPO_COMPRA) as [PurchaseTipoDocumento, string][]
+).map(([value, label]) => ({ label, value }))
 
 const accionesSii: { label: string; value: PurchaseAccionSii }[] = [
   { label: 'Aceptar contenido del documento', value: 'ACD' },

@@ -5,13 +5,26 @@ import { feathersClient } from '@/services/feathers'
 import { useAuthStore } from '@/stores/auth'
 import type { Customer, DteDocument, Paginated, Purchase, Supplier } from '@/types'
 import type { SeccionAyuda } from '@/components/AyudaPagina.vue'
+import {
+  agingDe,
+  documentosVigentes,
+  esNotaDeCompra,
+  ivaClp,
+  lineasPorCobrar,
+  lineasPorPagar,
+  rankingDe,
+  signoVenta,
+  totalClp
+} from '@/cuentas'
 
 // Tablero financiero: evolución mensual, cuentas por cobrar y por pagar con
 // antigüedad POR VENCIMIENTO (no por emisión: una factura a 30 días emitida
-// ayer no está atrasada), y el IVA estimado del mes (débito − crédito).
-// Vencimiento: fecha de emisión + plazo pactado del cliente, o el default
-// legal de 30 días (Ley 21.131). Exportaciones convertidas a pesos con su
-// tipo de cambio — sumar dólares con pesos mentiría.
+// ayer no está atrasada), el desglose documento por documento de lo que se
+// debe, y el IVA estimado del mes (débito − crédito).
+//
+// Las reglas de qué documento suma y cuál resta viven en cuentas.ts, no acá:
+// esta pantalla y el Panorama las tenían duplicadas y se descuadraban entre
+// sí. Lo propio de esta vista es la evolución mensual y el IVA.
 
 const auth = useAuthStore()
 const loading = ref(true)
@@ -19,16 +32,6 @@ const documents = ref<DteDocument[]>([])
 const purchases = ref<Purchase[]>([])
 const customers = ref<Customer[]>([])
 const suppliers = ref<Supplier[]>([])
-
-const PLAZO_LEGAL_DIAS = 30
-const DIA_MS = 24 * 60 * 60 * 1000
-const ESTADOS_EMITIDOS = ['pendiente_firma', 'firmado', 'enviado', 'aceptado', 'reparo']
-// Ventas (+): factura, exenta, liquidación, factura y ND de exportación, ND.
-// Restan (−): notas de crédito. La guía (52) no es venta por sí sola y la
-// factura de compra (46) es deuda con el proveedor, no venta.
-// La Liquidación (43) queda NEUTRA: su total es la rendición al mandante,
-// no una venta propia — la venta real es solo la comisión.
-const SIGNO_VENTA: Record<number, number> = { 33: 1, 34: 1, 56: 1, 61: -1, 110: 1, 111: 1, 112: -1 }
 
 async function fetchTodo<T>(service: string, select?: string[]): Promise<T[]> {
   // Solo los campos que los cálculos usan: sin $select cada documento viaja
@@ -56,26 +59,7 @@ async function fetchTodo<T>(service: string, select?: string[]): Promise<T[]> {
   return items
 }
 
-// Total del documento en PESOS: exportación se convierte con su tipo de
-// cambio (sus montos van en la moneda de la operación).
-function totalClp(doc: DteDocument): number {
-  const cambio = [110, 111, 112].includes(doc.tipoDte) ? (doc.exportacion?.tipoCambio ?? 0) : 1
-  return Math.round(doc.montos.total * cambio)
-}
-
-function ivaClp(doc: DteDocument): number {
-  return [110, 111, 112].includes(doc.tipoDte) ? 0 : doc.montos.iva
-}
-
-function esNotaDeCompra(doc: DteDocument): boolean {
-  return doc.retencionIvaCompra === true && doc.tipoDte !== 46
-}
-
-const docsEmitidos = computed(() =>
-  documents.value.filter(
-    (d) => d.ambiente === auth.currentOrganization?.ambiente && ESTADOS_EMITIDOS.includes(d.estado)
-  )
-)
+const docsEmitidos = computed(() => documentosVigentes(documents.value, auth.currentOrganization?.ambiente))
 
 // ---- Evolución mensual (últimos 12 meses) ----
 function claveMes(fecha: string | Date): string {
@@ -98,7 +82,7 @@ const evolucion = computed(() => {
   const compras = new Map<string, number>()
 
   for (const doc of docsEmitidos.value) {
-    const signo = esNotaDeCompra(doc) ? 0 : (SIGNO_VENTA[doc.tipoDte] ?? 0)
+    const signo = esNotaDeCompra(doc) ? 0 : signoVenta(doc.tipoDte)
     const mes = claveMes(doc.fechaEmision ?? doc.createdAt)
     if (signo !== 0) ventas.set(mes, (ventas.get(mes) ?? 0) + signo * totalClp(doc))
     if (doc.tipoDte === 46) compras.set(mes, (compras.get(mes) ?? 0) + doc.montos.total)
@@ -123,115 +107,19 @@ const evolucion = computed(() => {
   })
 })
 
-// ---- Cuentas por cobrar (aging por vencimiento) ----
-const creditosPorDocumento = computed(() => {
-  const mapa = new Map<string, number>()
-  for (const doc of docsEmitidos.value) {
-    if ((doc.tipoDte !== 61 && doc.tipoDte !== 112) || esNotaDeCompra(doc)) continue
-    const ref = (doc.referencias ?? []).find((r) => typeof r.tipoDteRef === 'number' && r.tipoDteRef < 800)
-    if (!ref) continue
-    const clave = `${ref.tipoDteRef}-${ref.folioRef}`
-    mapa.set(clave, (mapa.get(clave) ?? 0) + totalClp(doc))
-  }
-  return mapa
-})
+// ---- Cuentas por cobrar y por pagar (aging por vencimiento) ----
+// Las líneas son la unidad: el aging, el ranking por contraparte y el
+// desglose de abajo salen todos de la MISMA lista que suma el total, así que
+// no pueden contradecirse entre sí ni contra el Panorama (ver cuentas.ts).
+const lineasCobrar = computed(() => lineasPorCobrar(docsEmitidos.value, customers.value))
+const lineasPagar = computed(() => lineasPorPagar(docsEmitidos.value, purchases.value, suppliers.value))
 
-function saldoDoc(doc: DteDocument): number {
-  const credito = doc.folio != null ? (creditosPorDocumento.value.get(`${doc.tipoDte}-${doc.folio}`) ?? 0) : 0
-  return Math.max(0, totalClp(doc) - doc.montoPagado - credito)
-}
+const porCobrar = computed(() => ({ aging: agingDe(lineasCobrar.value), ranking: rankingDe(lineasCobrar.value) }))
+const porPagar = computed(() => ({ aging: agingDe(lineasPagar.value), ranking: rankingDe(lineasPagar.value) }))
 
-function vencimientoDoc(doc: DteDocument): Date {
-  const plazo = customers.value.find((c) => c._id === doc.customerId)?.plazoPagoDias ?? PLAZO_LEGAL_DIAS
-  return new Date(new Date(doc.fechaEmision ?? doc.createdAt).getTime() + plazo * DIA_MS)
-}
-
-interface Aging {
-  total: number
-  porVencer: number
-  v1a30: number
-  v31a60: number
-  v61a90: number
-  vMas90: number
-}
-
-function agregarAging(aging: Aging, saldo: number, vencimiento: Date): void {
-  aging.total += saldo
-  const dias = Math.floor((Date.now() - vencimiento.getTime()) / DIA_MS)
-  if (dias <= 0) aging.porVencer += saldo
-  else if (dias <= 30) aging.v1a30 += saldo
-  else if (dias <= 60) aging.v31a60 += saldo
-  else if (dias <= 90) aging.v61a90 += saldo
-  else aging.vMas90 += saldo
-}
-
-const blankAging = (): Aging => ({ total: 0, porVencer: 0, v1a30: 0, v31a60: 0, v61a90: 0, vMas90: 0 })
-
-const porCobrar = computed(() => {
-  const aging = blankAging()
-  const porCliente = new Map<string, { nombre: string; saldo: number; vencido: number }>()
-
-  for (const doc of docsEmitidos.value) {
-    if ((SIGNO_VENTA[doc.tipoDte] ?? 0) <= 0 || doc.tipoDte === 46 || esNotaDeCompra(doc)) continue
-    const saldo = saldoDoc(doc)
-    if (saldo <= 0) continue
-    const vencimiento = vencimientoDoc(doc)
-    agregarAging(aging, saldo, vencimiento)
-
-    const cliente = customers.value.find((c) => c._id === doc.customerId)
-    const clave = doc.customerId ?? '—'
-    const fila = porCliente.get(clave) ?? { nombre: cliente?.razonSocial ?? 'Sin cliente', saldo: 0, vencido: 0 }
-    fila.saldo += saldo
-    if (vencimiento.getTime() < Date.now()) fila.vencido += saldo
-    porCliente.set(clave, fila)
-  }
-
-  const ranking = [...porCliente.values()].sort((a, b) => b.saldo - a.saldo).slice(0, 8)
-  return { aging, ranking }
-})
-
-// ---- Cuentas por pagar (aging por vencimiento) ----
-const porPagar = computed(() => {
-  const aging = blankAging()
-  const porProveedor = new Map<string, { nombre: string; saldo: number; vencido: number }>()
-
-  function acumular(supplierId: string | undefined, saldo: number, vencimiento: Date): void {
-    agregarAging(aging, saldo, vencimiento)
-    const clave = supplierId ?? '—'
-    const nombre = suppliers.value.find((s) => s._id === supplierId)?.razonSocial ?? 'Sin proveedor'
-    const fila = porProveedor.get(clave) ?? { nombre, saldo: 0, vencido: 0 }
-    fila.saldo += saldo
-    if (vencimiento.getTime() < Date.now()) fila.vencido += saldo
-    porProveedor.set(clave, fila)
-  }
-
-  for (const compra of purchases.value) {
-    if (compra.tipoDocumento === 'factura_compra') continue
-    // Una nota de crédito del proveedor REBAJA la deuda (signo negativo,
-    // siempre); las demás compras suman solo si están impagas.
-    const esCredito = compra.tipoDocumento === 'nota_credito'
-    if (!esCredito && compra.pagado) continue
-    const vencimiento = compra.fechaVencimiento
-      ? new Date(compra.fechaVencimiento)
-      : new Date(new Date(compra.fecha).getTime() + PLAZO_LEGAL_DIAS * DIA_MS)
-    acumular(compra.supplierId, (esCredito ? -1 : 1) * compra.montoTotal, vencimiento)
-  }
-  for (const doc of docsEmitidos.value) {
-    if (esNotaDeCompra(doc)) {
-      // ND de compra suma deuda; NC de compra la rebaja.
-      const signoNota = doc.tipoDte === 61 || doc.tipoDte === 112 ? -1 : 1
-      acumular(doc.supplierId, signoNota * doc.montos.total, new Date(new Date(doc.fechaEmision ?? doc.createdAt).getTime() + PLAZO_LEGAL_DIAS * DIA_MS))
-      continue
-    }
-    if (doc.tipoDte !== 46) continue
-    const saldo = doc.montos.total - doc.montoPagado
-    if (saldo <= 0) continue
-    acumular(doc.supplierId, saldo, new Date(new Date(doc.fechaEmision ?? doc.createdAt).getTime() + PLAZO_LEGAL_DIAS * DIA_MS))
-  }
-
-  const ranking = [...porProveedor.values()].sort((a, b) => b.saldo - a.saldo).slice(0, 8)
-  return { aging, ranking }
-})
+// El desglose se ordena por monto: lo que más pesa en el total es lo primero
+// que uno quiere ver cuando el número no calza con lo que esperaba.
+const desglosePagar = computed(() => [...lineasPagar.value].sort((a, b) => b.monto - a.monto))
 
 // El mes en curso es la última columna de la evolución.
 const mesActual = computed(() => evolucion.value[evolucion.value.length - 1])
@@ -245,7 +133,7 @@ const ivaMes = computed(() => {
   let credito = 0
   for (const doc of docsEmitidos.value) {
     if (claveMes(doc.fechaEmision ?? doc.createdAt) !== mesActual) continue
-    const signo = SIGNO_VENTA[doc.tipoDte] ?? 0
+    const signo = signoVenta(doc.tipoDte)
     if (signo !== 0) debito += signo * ivaClp(doc)
     if (doc.tipoDte === 46) credito += doc.montos.iva
   }
@@ -277,6 +165,8 @@ const AYUDA_FINANZAS: SeccionAyuda[] = [
     items: [
       { nombre: 'Vencimientos', descripcion: 'Fecha de emisión + plazo pactado del cliente (ficha del cliente); sin pacto rigen los 30 días de la Ley 21.131. "Por vencer" es deuda sana; los tramos vencidos son la que hay que cobrar.' },
       { nombre: 'Notas de crédito', descripcion: 'Rebajan el saldo de la factura que referencian, no cuentan como línea aparte.' },
+      { nombre: 'De dónde sale el "por pagar"', descripcion: 'De DOS lugares: las compras que registras (página Compras) y las facturas de compra que emites tú por cambio de sujeto, que viven en Documentos. El desglose de abajo muestra cada documento y en qué pantalla está.' },
+      { nombre: 'Certificación', descripcion: 'Los documentos y compras de prueba nunca se suman a los de producción: cada uno cuenta solo en su ambiente.' },
       { nombre: 'Exportaciones', descripcion: 'Se convierten a pesos con el tipo de cambio del documento.' },
       { nombre: 'IVA estimado', descripcion: 'Débito (ventas del mes) menos crédito (compras del mes): lo que se pagaría en el F29. Es referencial — el definitivo depende de los tratamientos de IVA de cada compra.' },
       { nombre: 'Liquidaciones (43)', descripcion: 'No se cuentan como venta ni cobranza: su total es la rendición al mandante, no ingreso propio.' },
@@ -418,6 +308,49 @@ onMounted(async () => {
           </table>
         </section>
       </div>
+
+      <!-- El desglose: de dónde sale cada peso del total, y en qué pantalla
+           está cada documento. La columna "Dónde" existe porque la mitad de
+           esta lista NO está en Compras (las facturas de compra las emites
+           tú, así que viven en Documentos) — no saberlo era exactamente lo
+           que hacía imposible cuadrar el total. -->
+      <section class="panel">
+        <h2>Por pagar — documento por documento</h2>
+        <p class="detalle">
+          Todo lo que suma el total de arriba, de mayor a menor. Las notas de crédito aparecen en negativo
+          porque rebajan la deuda.
+        </p>
+        <table class="tabla-ranking">
+          <thead>
+            <tr>
+              <th>Documento</th>
+              <th>Proveedor</th>
+              <th class="num">Monto</th>
+              <th>Dónde</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="linea in desglosePagar" :key="linea.id">
+              <td>{{ linea.descripcion }}</td>
+              <td>{{ linea.contraparte }}</td>
+              <td class="num" :class="{ sano: linea.monto < 0 }">${{ fm(linea.monto) }}</td>
+              <td>
+                <router-link :to="linea.verEn === 'compras' ? '/purchases' : '/documents'">
+                  {{ linea.verEn === 'compras' ? 'Compras' : 'Documentos' }}
+                </router-link>
+              </td>
+            </tr>
+            <tr v-if="desglosePagar.length === 0"><td colspan="4" class="vacio">Nada pendiente de pago 🎉</td></tr>
+          </tbody>
+          <tfoot v-if="desglosePagar.length > 0">
+            <tr>
+              <td colspan="2"><strong>Total por pagar</strong></td>
+              <td class="num"><strong>${{ fm(porPagar.aging.total) }}</strong></td>
+              <td></td>
+            </tr>
+          </tfoot>
+        </table>
+      </section>
     </template>
   </div>
 </template>
@@ -447,7 +380,9 @@ onMounted(async () => {
 .cuadro { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; }
 .dos-columnas { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 1rem; }
 .tabla-aging, .tabla-ranking { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
-.tabla-aging td, .tabla-ranking td { padding: 0.35rem 0.25rem; border-bottom: 1px solid #f1f4f8; }
+.tabla-aging td, .tabla-ranking td, .tabla-ranking th { padding: 0.35rem 0.25rem; border-bottom: 1px solid #f1f4f8; }
+.tabla-ranking th { text-align: left; font-size: 0.78rem; color: #64748b; font-weight: 600; }
+.tabla-ranking tfoot td { border-bottom: none; border-top: 2px solid #e2e8f0; padding-top: 0.5rem; }
 .num { text-align: right; font-variant-numeric: tabular-nums; }
 .sano { color: #15803d; }
 .alerta { color: #b45309; }
