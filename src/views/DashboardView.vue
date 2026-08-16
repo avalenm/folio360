@@ -141,14 +141,28 @@ const facturasDeCompraEmitidas = computed(() =>
   )
 )
 
+// Una nota de crédito de un proveedor REBAJA lo que le debes — va con
+// signo negativo, no como una deuda más (antes se sumaba y el total del
+// Panorama no calzaba con Finanzas, encontrado en vivo).
 const comprasPorPagarList = computed(() =>
-  purchases.value.filter((purchase) => !purchase.pagado && purchase.tipoDocumento !== 'factura_compra')
+  purchases.value.filter(
+    (purchase) => !purchase.pagado && purchase.tipoDocumento !== 'factura_compra' && purchase.tipoDocumento !== 'nota_credito'
+  )
 )
 
-const porPagar = computed(
-  () =>
+const creditosDeCompras = computed(() =>
+  purchases.value
+    .filter((purchase) => purchase.tipoDocumento === 'nota_credito')
+    .reduce((sum, purchase) => sum + purchase.montoTotal, 0)
+)
+
+const porPagar = computed(() =>
+  Math.max(
+    0,
     comprasPorPagarList.value.reduce((sum, purchase) => sum + purchase.montoTotal, 0) +
-    facturasDeCompraEmitidas.value.reduce((sum, doc) => sum + (doc.montos.total - doc.montoPagado), 0)
+      facturasDeCompraEmitidas.value.reduce((sum, doc) => sum + (doc.montos.total - doc.montoPagado), 0) -
+      creditosDeCompras.value
+  )
 )
 
 function formatCurrency(value: number): string {

@@ -183,11 +183,15 @@ const porPagar = computed(() => {
   }
 
   for (const compra of purchases.value) {
-    if (compra.pagado || compra.tipoDocumento === 'factura_compra' || compra.tipoDocumento === 'nota_credito') continue
+    if (compra.tipoDocumento === 'factura_compra') continue
+    // Una nota de crédito del proveedor REBAJA la deuda (signo negativo,
+    // siempre); las demás compras suman solo si están impagas.
+    const esCredito = compra.tipoDocumento === 'nota_credito'
+    if (!esCredito && compra.pagado) continue
     const vencimiento = compra.fechaVencimiento
       ? new Date(compra.fechaVencimiento)
       : new Date(new Date(compra.fecha).getTime() + PLAZO_LEGAL_DIAS * DIA_MS)
-    acumular(compra.supplierId, compra.montoTotal, vencimiento)
+    acumular(compra.supplierId, (esCredito ? -1 : 1) * compra.montoTotal, vencimiento)
   }
   for (const doc of docsEmitidos.value) {
     if (doc.tipoDte !== 46) continue
