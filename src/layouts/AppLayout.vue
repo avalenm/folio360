@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import LogoFolio360 from '@/components/LogoFolio360.vue'
 import type { Role } from '@/types'
 
 const router = useRouter()
@@ -96,8 +97,7 @@ function handleSwitchOrganization(): void {
   <div class="shell">
     <aside class="sidebar">
       <div class="sidebar-logo">
-        <div class="sidebar-logo-mark"><i class="pi pi-file-check" /></div>
-        <span class="sidebar-logo-title">Folio360</span>
+        <LogoFolio360 variante="oscuro" :alto="32" />
       </div>
 
       <nav class="sidebar-nav">
@@ -179,27 +179,6 @@ function handleSwitchOrganization(): void {
   padding: 0 1.25rem 1.5rem;
   display: flex;
   align-items: center;
-  gap: 0.65rem;
-}
-
-.sidebar-logo-mark {
-  width: 30px;
-  height: 30px;
-  border-radius: 8px;
-  background: linear-gradient(135deg, var(--accent), #7c6ff0);
-  color: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.85rem;
-  flex-shrink: 0;
-}
-
-.sidebar-logo-title {
-  color: #fff;
-  font-weight: 600;
-  font-size: 0.975rem;
-  letter-spacing: -0.01em;
 }
 
 .sidebar-nav {

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import LogoFolio360 from '@/components/LogoFolio360.vue'
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import InputText from 'primevue/inputtext'
@@ -34,11 +35,10 @@ async function handleSubmit(): Promise<void> {
   <div class="login-page">
     <form class="login-card" @submit.prevent="handleSubmit">
       <div class="login-brand">
-        <div class="login-logo"><i class="pi pi-file-check" /></div>
-        <div>
-          <h1 class="login-title">Folio360</h1>
-          <p class="login-subtitle">Inicia sesión para continuar</p>
-        </div>
+        <!-- Variante clara: acá el fondo es blanco, así que la tinta vuelve a
+             ser azul marino como en el logo original. -->
+        <LogoFolio360 variante="claro" :alto="38" />
+        <p class="login-subtitle">Inicia sesión para continuar</p>
       </div>
 
       <Message v-if="error" severity="error" :closable="false">{{ error }}</Message>
@@ -85,29 +85,10 @@ async function handleSubmit(): Promise<void> {
 
 .login-brand {
   display: flex;
-  align-items: center;
-  gap: 0.85rem;
-  margin-bottom: 0.35rem;
-}
-
-.login-logo {
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
-  background: linear-gradient(135deg, var(--accent), #7c6ff0);
-  color: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 1.2rem;
-  flex-shrink: 0;
-}
-
-.login-title {
-  margin: 0;
-  font-size: 1.2rem;
-  font-weight: 800;
-  letter-spacing: -0.01em;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin-bottom: 1.25rem;
 }
 
 .login-subtitle {
