@@ -15,12 +15,30 @@ import ToggleSwitch from 'primevue/toggleswitch'
 import { useConfirm } from 'primevue/useconfirm'
 import { useToast } from 'primevue/usetoast'
 import { useResource } from '@/composables/useResource'
+import { useAuthStore } from '@/stores/auth'
 import type { Caf } from '@/types'
 import { nombreTipoDte } from '@/tiposDte'
 
 const { items, loading, fetchAll, create, remove } = useResource<Caf>('caf')
+const auth = useAuthStore()
 const confirm = useConfirm()
 const toast = useToast()
+
+// El ambiente en que está la organización: es el único cuyos folios se pueden
+// usar hoy (reserve-folio.ts busca por ambiente, ver el servidor).
+const ambienteActual = computed(() => auth.currentOrganization?.ambiente ?? 'certificacion')
+
+// Los CAF del OTRO ambiente se ocultan por defecto. No es solo orden: en el
+// balance, ver folios que no se pueden usar invita a creer que hay folios
+// cuando no los hay, y el error aparecería recién al intentar emitir. Se
+// pueden destapar, porque siguen existiendo y a veces hay que revisarlos.
+const mostrarOtroAmbiente = ref(false)
+
+const cafsDelAmbiente = computed(() =>
+  mostrarOtroAmbiente.value ? items.value : items.value.filter((caf) => caf.ambiente === ambienteActual.value)
+)
+
+const hayOtroAmbiente = computed(() => items.value.some((caf) => caf.ambiente !== ambienteActual.value))
 
 const ambientes = [
   { label: 'Certificación', value: 'certificacion' },
@@ -41,7 +59,7 @@ function folioDisponibles(caf: Caf): number {
 }
 
 const visibleItems = computed(() =>
-  mostrarAgotados.value ? items.value : items.value.filter((caf) => folioDisponibles(caf) > 0)
+  mostrarAgotados.value ? cafsDelAmbiente.value : cafsDelAmbiente.value.filter((caf) => folioDisponibles(caf) > 0)
 )
 
 // Balance de folios disponibles por tipo de DTE + ambiente. Separados por
@@ -50,7 +68,7 @@ const visibleItems = computed(() =>
 const balanceFolios = computed(() => {
   const porGrupo = new Map<string, { key: string; tipoDte: number; ambiente: Caf['ambiente']; disponibles: number }>()
 
-  for (const caf of items.value) {
+  for (const caf of cafsDelAmbiente.value) {
     if (caf.estado !== 'activo') continue
     const key = `${caf.tipoDte}-${caf.ambiente}`
     const grupo = porGrupo.get(key) ?? { key, tipoDte: caf.tipoDte, ambiente: caf.ambiente, disponibles: 0 }
@@ -74,7 +92,10 @@ interface CafDraft {
 }
 
 function emptyDraft(): CafDraft {
-  return { tipoDte: 33, ambiente: 'certificacion', folioDesde: null, folioHasta: null, xmlRaw: '', fechaAutorizacion: new Date() }
+  // Sigue a la organización, pero SE PUEDE cambiar: hay que poder cargar los
+  // CAF de producción mientras todavía se está en certificación, que es el
+  // orden natural (el SII recién te los entrega cuando te autoriza).
+  return { tipoDte: 33, ambiente: ambienteActual.value, folioDesde: null, folioHasta: null, xmlRaw: '', fechaAutorizacion: new Date() }
 }
 
 const draft = reactive<CafDraft>(emptyDraft())
@@ -206,6 +227,11 @@ onMounted(fetchAll)
         <ToggleSwitch v-model="mostrarAgotados" />
         <span>Mostrar CAF agotados</span>
       </label>
+      <!-- Aparece solo si hay algo del otro ambiente que mostrar. -->
+      <label v-if="hayOtroAmbiente" class="toggle-agotados">
+        <ToggleSwitch v-model="mostrarOtroAmbiente" />
+        <span>Mostrar también los del otro ambiente</span>
+      </label>
     </div>
 
     <DataTable :value="visibleItems" :loading="loading" data-key="_id" striped-rows>
@@ -245,6 +271,18 @@ onMounted(fetchAll)
         <label class="field">
           <span>Ambiente</span>
           <Select v-model="draft.ambiente" :options="ambientes" option-label="label" option-value="value" />
+          <!-- El caso normal es cargar los CAF de producción ANTES de pasar la
+               organización a producción, así que esto no es un error. Pero
+               un CAF del ambiente equivocado no lo encuentra nadie: la
+               emisión falla con "no hay folios disponibles" y la causa no se
+               ve por ninguna parte. -->
+          <small v-if="draft.ambiente !== ambienteActual" class="aviso-ambiente">
+            <i class="pi pi-info-circle" />
+            Estos folios quedarán guardados para
+            <strong>{{ draft.ambiente === 'produccion' ? 'producción' : 'certificación' }}</strong>, y hoy estás
+            en {{ ambienteActual === 'produccion' ? 'producción' : 'certificación' }}: no se van a usar hasta que
+            cambies de ambiente.
+          </small>
         </label>
         <label class="field">
           <span>Folio desde</span>
@@ -310,9 +348,24 @@ onMounted(fetchAll)
   margin-top: 0.15rem;
 }
 
+.aviso-ambiente {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  margin-top: 0.35rem;
+  padding: 0.5rem 0.65rem;
+  border-radius: 6px;
+  background: #eff6ff;
+  color: #1e40af;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
 .table-toolbar {
   display: flex;
   justify-content: flex-end;
+  gap: 1.5rem;
+  flex-wrap: wrap;
   margin-bottom: 0.75rem;
 }
 
