@@ -92,6 +92,33 @@ export interface CreditoSinAplicar {
   motivo: MotivoCreditoSinAplicar
 }
 
+// Cuánto IVA está poniendo la empresa de su bolsillo por facturas emitidas
+// que no le pagaron. El IVA débito se devenga con la EMISIÓN, no con el
+// cobro: se declara y se entera al mes siguiente, haya pagado el cliente o
+// no. Ver services/cuentas/calculo.ts en el servidor.
+export interface LineaIva {
+  id: string
+  descripcion: string
+  contraparte: string
+  saldo: number
+  iva: number
+  vencimiento: string
+  diasVencido: number
+  enterado: boolean
+}
+
+export interface IvaFinanciado {
+  // Lo que ya se le pagó al SII y no ha vuelto: el número que duele.
+  enterado: number
+  // Del mes en curso, todavía no enterado. Alerta de caja, no pérdida.
+  porEnterar: number
+  aging: Aging
+  lineas: LineaIva[]
+}
+
+// Desde cuántos días de mora conviene revisar el caso con el contador.
+export const DIAS_PARA_REVISAR_INCOBRABLE = 90
+
 export interface ResumenCuentas {
   porCobrar: {
     total: number
@@ -112,6 +139,7 @@ export interface ResumenCuentas {
   mes: { ventas: number; ivaDebito: number; ivaCredito: number; ivaNeto: number; documentos: number }
   evolucion: { mes: string; ventas: number; compras: number; margen: number }[]
   posicionNeta: number
+  ivaFinanciado: IvaFinanciado
 }
 
 // Por qué una nota de crédito no alcanzó a descontarse. El total la ignora a

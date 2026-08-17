@@ -3,7 +3,12 @@ import AyudaPagina from '@/components/AyudaPagina.vue'
 import { computed, onMounted, ref } from 'vue'
 import { feathersClient } from '@/services/feathers'
 import type { SeccionAyuda } from '@/components/AyudaPagina.vue'
-import { GLOSA_CREDITO_SIN_APLICAR, formatMonto, type ResumenCuentas } from '@/cuentas'
+import {
+  DIAS_PARA_REVISAR_INCOBRABLE,
+  GLOSA_CREDITO_SIN_APLICAR,
+  formatMonto,
+  type ResumenCuentas
+} from '@/cuentas'
 
 // Tablero financiero: evolución mensual, cuentas por cobrar y por pagar con
 // antigüedad POR VENCIMIENTO (no por emisión: una factura a 30 días emitida
@@ -34,6 +39,21 @@ const ivaMes = computed(() => ({
   neto: resumen.value?.mes.ivaNeto ?? 0
 }))
 const posicionNeta = computed(() => resumen.value?.posicionNeta ?? 0)
+
+// El IVA que la empresa puso de su bolsillo por facturas que no le pagaron.
+const AGING_CERO_IVA = { total: 0, porVencer: 0, v1a30: 0, v31a60: 0, v61a90: 0, vMas90: 0 }
+const ivaFinanciado = computed(
+  () => resumen.value?.ivaFinanciado ?? { enterado: 0, porEnterar: 0, aging: AGING_CERO_IVA, lineas: [] }
+)
+
+// Las que llevan tanto tiempo impagas que ya no parecen un desfase de
+// cobranza. No se afirma que califiquen para recuperar el IVA: eso tiene
+// requisitos que esta app no puede evaluar. Solo se señalan para revisarlas.
+const paraRevisar = computed(() =>
+  ivaFinanciado.value.lineas.filter((l) => l.enterado && l.diasVencido > DIAS_PARA_REVISAR_INCOBRABLE)
+)
+
+const ivaParaRevisar = computed(() => paraRevisar.value.reduce((suma, l) => suma + l.iva, 0))
 
 // La evolución llega con los montos; el alto de cada barra es presentación,
 // así que se calcula acá.
@@ -75,7 +95,9 @@ const AYUDA_FINANZAS: SeccionAyuda[] = [
       { nombre: 'Exportaciones', descripcion: 'Los totales van en pesos, convertidos con el tipo de cambio del DÍA DE EMISIÓN de cada documento — es lo único sumable y lo que calza con lo que declaras al SII. Junto a cada documento se muestra su moneda real, y acá aparece aparte cuánto del total depende del tipo de cambio.' },
       { nombre: 'IVA estimado', descripcion: 'Débito (ventas del mes) menos crédito (compras del mes): lo que se pagaría en el F29. Es referencial — el definitivo depende de los tratamientos de IVA de cada compra.' },
       { nombre: 'Liquidaciones (43)', descripcion: 'No se cuentan como venta ni cobranza: su total es la rendición al mandante, no ingreso propio.' },
-      { nombre: 'Posición neta', descripcion: 'Por cobrar menos por pagar: el capital de trabajo que tienes en la calle.' }
+      { nombre: 'Posición neta', descripcion: 'Por cobrar menos por pagar: el capital de trabajo que tienes en la calle.' },
+      { nombre: 'IVA que estás financiando', descripcion: 'El IVA de tus ventas se declara y se paga por la FECHA DE EMISIÓN, no por la de cobro. Si el cliente no te paga, ese 19% igual salió de tu caja. Se separa lo ya enterado al SII (plata que pusiste) de lo del mes en curso (que todavía no pagas). Se prorratea: si te pagaron la mitad de una factura, financias la mitad de su IVA.' },
+      { nombre: 'Facturas con mucha mora', descripcion: 'Se señalan para que las revises con tu contador. El SII permite recuperar el IVA de deudas incobrables bajo ciertas condiciones, pero los requisitos hay que evaluarlos caso a caso — la app no determina si califican.' }
     ]
   }
 ]
@@ -239,6 +261,81 @@ onMounted(async () => {
         </section>
       </div>
 
+      <!-- El IVA que la empresa financió. Va antes del desglose de deudas
+           porque es el hallazgo menos evidente de toda la pantalla: el IVA de
+           una venta se entera al SII con la EMISIÓN, no con el cobro, así que
+           una factura impaga significa plata puesta de tu bolsillo. -->
+      <section class="panel">
+        <h2>IVA que estás financiando</h2>
+        <p class="detalle">
+          El IVA de tus ventas se declara y se paga por la fecha de emisión, no por la de cobro. Lo de abajo es
+          el IVA de facturas que emitiste y todavía no te pagan.
+        </p>
+
+        <div class="iva-tarjetas">
+          <div class="iva-tarjeta grave">
+            <span class="etiqueta">Ya enterado al SII y no cobrado</span>
+            <span class="valor">${{ fm(ivaFinanciado.enterado) }}</span>
+            <span class="detalle">De meses ya declarados: esta plata salió de tu caja y no ha vuelto.</span>
+          </div>
+          <div class="iva-tarjeta">
+            <span class="etiqueta">Por enterar del mes en curso</span>
+            <span class="valor">${{ fm(ivaFinanciado.porEnterar) }}</span>
+            <span class="detalle">Todavía no se lo pagas al SII. No es pérdida: es lo que tienes que tener el mes que viene.</span>
+          </div>
+        </div>
+
+        <template v-if="ivaFinanciado.enterado > 0">
+          <h3>Hace cuánto que no vuelve</h3>
+          <table class="tabla-aging">
+            <tbody>
+              <tr><td>Por vencer</td><td class="num sano">${{ fm(ivaFinanciado.aging.porVencer) }}</td></tr>
+              <tr><td>Vencido 1–30 días</td><td class="num">${{ fm(ivaFinanciado.aging.v1a30) }}</td></tr>
+              <tr><td>Vencido 31–60 días</td><td class="num alerta">${{ fm(ivaFinanciado.aging.v31a60) }}</td></tr>
+              <tr><td>Vencido 61–90 días</td><td class="num alerta">${{ fm(ivaFinanciado.aging.v61a90) }}</td></tr>
+              <tr><td>Vencido +90 días</td><td class="num critico">${{ fm(ivaFinanciado.aging.vMas90) }}</td></tr>
+            </tbody>
+          </table>
+        </template>
+
+        <!-- Se señalan para REVISAR, sin afirmar que califican: recuperar el
+             IVA de una deuda incobrable ante el SII tiene requisitos que esta
+             app no puede evaluar. La decisión es del contador. -->
+        <div v-if="paraRevisar.length > 0" class="iva-revisar">
+          <strong><i class="pi pi-exclamation-triangle" /> ${{ fm(ivaParaRevisar) }} en facturas con más de {{ DIAS_PARA_REVISAR_INCOBRABLE }} días de mora</strong>
+          <span>
+            Vale la pena revisarlas con tu contador. Bajo ciertas condiciones el SII permite recuperar el IVA de
+            deudas incobrables, pero los requisitos (plazos y gestiones de cobranza acreditables) hay que
+            evaluarlos caso a caso — la app no puede determinarlo por ti.
+          </span>
+        </div>
+
+        <template v-if="ivaFinanciado.lineas.length > 0">
+          <h3>Factura por factura</h3>
+          <table class="tabla-ranking">
+            <thead>
+              <tr>
+                <th>Documento</th><th>Cliente</th><th class="num">Por cobrar</th><th class="num">IVA</th><th>Mora</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="linea in ivaFinanciado.lineas" :key="linea.id">
+                <td>{{ linea.descripcion }}</td>
+                <td>{{ linea.contraparte }}</td>
+                <td class="num">${{ fm(linea.saldo) }}</td>
+                <td class="num" :class="{ critico: linea.diasVencido > DIAS_PARA_REVISAR_INCOBRABLE }">${{ fm(linea.iva) }}</td>
+                <td class="detalle">
+                  <span v-if="!linea.enterado">del mes en curso</span>
+                  <span v-else-if="linea.diasVencido === 0">al día</span>
+                  <span v-else>{{ linea.diasVencido }} días</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </template>
+        <p v-else class="vacio">No tienes IVA financiado: todo lo que emitiste con IVA está cobrado 🎉</p>
+      </section>
+
       <!-- El desglose: de dónde sale cada peso del total, y en qué pantalla
            está cada documento. La columna "Dónde" existe porque la mitad de
            esta lista NO está en Compras (las facturas de compra las emites
@@ -318,6 +415,13 @@ onMounted(async () => {
 .alerta { color: #b45309; }
 .critico { color: #b91c1c; font-weight: 650; }
 .vacio { color: #64748b; text-align: center; padding: 0.75rem 0; }
+.iva-tarjetas { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; margin: 1rem 0; }
+.iva-tarjeta { display: flex; flex-direction: column; gap: 0.25rem; padding: 1rem 1.1rem; border-radius: 10px; background: #f8fafc; border: 1px solid #e2e8f0; }
+.iva-tarjeta.grave { background: #fff7ed; border-color: #fdba74; }
+.iva-tarjeta .valor { font-size: 1.45rem; font-weight: 750; }
+.iva-tarjeta.grave .valor { color: #c2410c; }
+.iva-revisar { display: flex; flex-direction: column; gap: 0.35rem; margin-top: 1rem; padding: 0.85rem 1rem; border-radius: 8px; background: #fef2f2; border-left: 3px solid #ef4444; font-size: 0.83rem; color: #7f1d1d; }
+.iva-revisar strong { display: flex; align-items: center; gap: 0.4rem; }
 .exposicion { margin-top: 1rem; padding: 0.75rem; border-radius: 8px; background: #f8fafc; display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.85rem; }
 .exposicion-fila { display: flex; justify-content: space-between; gap: 1rem; font-variant-numeric: tabular-nums; }
 </style>

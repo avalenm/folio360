@@ -42,6 +42,10 @@ const porPagar = computed(() => resumen.value?.porPagar.total ?? 0)
 // se va a cobrar. El detalle está en Finanzas.
 const exposicionCobrar = computed(() => resumen.value?.porCobrar.exposicion ?? [])
 
+// Solo el ya enterado: el del mes en curso todavía no salió de la caja, así
+// que avisarlo como si fuera plata perdida sería alarmista.
+const ivaFinanciado = computed(() => resumen.value?.ivaFinanciado.enterado ?? 0)
+
 function formatCurrency(value: number): string {
   return value.toLocaleString('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 })
 }
@@ -325,6 +329,18 @@ onUnmounted(() => {
         </footer>
       </article>
     </div>
+
+    <!-- El IVA de una venta se entera al SII con la EMISIÓN, no con el cobro:
+         una factura impaga es plata puesta del bolsillo propio. Va como aviso
+         y no como tarjeta porque solo aparece cuando hay algo que avisar. -->
+    <router-link v-if="ivaFinanciado > 0" to="/finanzas" class="aviso-iva">
+      <i class="pi pi-exclamation-triangle" />
+      <span>
+        Estás financiando <strong>{{ formatCurrency(ivaFinanciado) }}</strong> de IVA por facturas emitidas que
+        aún no te pagan — ya se lo enteraste al SII.
+      </span>
+      <i class="pi pi-arrow-right" />
+    </router-link>
       </div>
     </div>
 
@@ -412,6 +428,22 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.aviso-iva {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  margin-top: 1rem;
+  padding: 0.85rem 1.1rem;
+  border-radius: 10px;
+  background: #fff7ed;
+  border: 1px solid #fdba74;
+  color: #7c2d12;
+  font-size: 0.87rem;
+  text-decoration: none;
+}
+.aviso-iva:hover { background: #ffedd5; }
+.aviso-iva span { flex: 1; }
+
 .dashboard {
   display: flex;
   flex-direction: column;
