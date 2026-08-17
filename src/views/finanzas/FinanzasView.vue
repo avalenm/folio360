@@ -308,9 +308,20 @@ onMounted(async () => {
                  "es lo que tienes que tener el mes que viene" contradecía
                  la tarjeta de IVA estimado de más arriba, en la misma
                  pantalla. -->
+            <span class="detalle">Es el IVA de esas facturas, que todavía no le pagas al SII.</span>
+
+            <!-- El neto va como CIFRA y no dentro del texto: es el número que
+                 el usuario realmente necesita —lo que sale de la caja— y
+                 enterrarlo en una frase obliga a leer para encontrarlo. El de
+                 arriba se queda porque responde otra pregunta: cuánto de ese
+                 débito depende de que te paguen. -->
+            <div class="iva-a-pagar">
+              <span class="etiqueta">A pagar al SII este mes</span>
+              <span class="valor-secundario">${{ fm(ivaMes.neto) }}</span>
+            </div>
             <span class="detalle">
-              Es el IVA de esas facturas, que todavía no le pagas al SII. Lo que efectivamente pagarás es el
-              <strong>neto del mes</strong> (${{ fm(ivaMes.neto) }}), porque el crédito de tus compras lo rebaja.
+              El crédito de tus compras (${{ fm(ivaMes.credito) }}) rebaja el débito del mes
+              (${{ fm(ivaMes.debito) }}). Ese neto es lo que se declara en el F29.
             </span>
           </div>
         </div>
@@ -450,6 +461,21 @@ onMounted(async () => {
 .iva-tarjeta.grave { background: #fff7ed; border-color: #fdba74; }
 .iva-tarjeta.sano { background: #f0fdf4; border-color: #86efac; }
 .iva-tarjeta.sano .valor { color: #15803d; }
+.iva-a-pagar {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 0.55rem;
+  padding-top: 0.55rem;
+  border-top: 1px solid #e2e8f0;
+}
+.valor-secundario {
+  font-size: 1.1rem;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+  color: #1e293b;
+}
 .iva-tarjeta .valor { font-size: 1.45rem; font-weight: 750; }
 .iva-tarjeta.grave .valor { color: #c2410c; }
 .iva-revisar { display: flex; flex-direction: column; gap: 0.35rem; margin-top: 1rem; padding: 0.85rem 1rem; border-radius: 8px; background: #fef2f2; border-left: 3px solid #ef4444; font-size: 0.83rem; color: #7f1d1d; }
