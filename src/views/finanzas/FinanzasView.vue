@@ -36,7 +36,10 @@ const desglosePagar = computed(() => resumen.value?.porPagar.lineas ?? [])
 const ivaMes = computed(() => ({
   debito: resumen.value?.mes.ivaDebito ?? 0,
   credito: resumen.value?.mes.ivaCredito ?? 0,
-  neto: resumen.value?.mes.ivaNeto ?? 0
+  neto: resumen.value?.mes.ivaNeto ?? 0,
+  usoComun: resumen.value?.mes.ivaUsoComun ?? 0,
+  factor: resumen.value?.mes.factorProporcionalidad ?? 1,
+  sinCredito: resumen.value?.mes.ivaSinDerechoACredito ?? 0
 }))
 const posicionNeta = computed(() => resumen.value?.posicionNeta ?? 0)
 
@@ -93,7 +96,9 @@ const AYUDA_FINANZAS: SeccionAyuda[] = [
       { nombre: 'De dónde sale el "por pagar"', descripcion: 'De DOS lugares: las compras que registras (página Compras) y las facturas de compra que emites tú por cambio de sujeto, que viven en Documentos. El desglose de abajo muestra cada documento y en qué pantalla está.' },
       { nombre: 'Certificación', descripcion: 'Los documentos y compras de prueba nunca se suman a los de producción: cada uno cuenta solo en su ambiente.' },
       { nombre: 'Exportaciones', descripcion: 'Los totales van en pesos, convertidos con el tipo de cambio del DÍA DE EMISIÓN de cada documento — es lo único sumable y lo que calza con lo que declaras al SII. Junto a cada documento se muestra su moneda real, y acá aparece aparte cuánto del total depende del tipo de cambio.' },
-      { nombre: 'IVA estimado', descripcion: 'Débito (ventas del mes) menos crédito (compras del mes): lo que se pagaría en el F29. Es referencial — el definitivo depende de los tratamientos de IVA de cada compra.' },
+      { nombre: 'IVA estimado', descripcion: 'Débito (ventas del mes) menos crédito (compras del mes): lo que se pagaría en el F29. Es referencial.' },
+      { nombre: 'IVA de uso común', descripcion: 'El de compras que sirven a la vez a ventas afectas y exentas. Da crédito solo en la proporción de ventas afectas del mes (el factor). OJO: el factor legal se acumula desde enero del año comercial, así que este es una estimación del mes — el definitivo lo determina quien declara.' },
+      { nombre: 'IVA sin derecho a crédito', descripcion: 'Se pagó pero no se descuenta (gastos rechazados, entregas gratuitas, facturas fuera de plazo). Se informa aparte porque es un costo real que no aparece en ninguna otra cifra.' },
       { nombre: 'Liquidaciones (43)', descripcion: 'No se cuentan como venta ni cobranza: su total es la rendición al mandante, no ingreso propio.' },
       { nombre: 'Posición neta', descripcion: 'Por cobrar menos por pagar: el capital de trabajo que tienes en la calle.' },
       { nombre: 'IVA que estás financiando', descripcion: 'El IVA de tus ventas se declara y se paga por la FECHA DE EMISIÓN, no por la de cobro. Si el cliente no te paga, ese 19% igual salió de tu caja. Se separa lo ya enterado al SII (plata que pusiste) de lo del mes en curso (que todavía no pagas). Se prorratea: si te pagaron la mitad de una factura, financias la mitad de su IVA.' },
@@ -138,6 +143,16 @@ onMounted(async () => {
           <span class="etiqueta">IVA estimado del mes</span>
           <span class="valor">${{ fm(ivaMes.neto) }}</span>
           <span class="detalle">débito ${{ fm(ivaMes.debito) }} − crédito ${{ fm(ivaMes.credito) }}</span>
+          <!-- El uso común da crédito solo en la proporción de ventas
+               afectas: sin decirlo, el crédito no cuadra con la suma del IVA
+               de las compras del mes. -->
+          <span v-if="ivaMes.usoComun !== 0" class="detalle">
+            incluye ${{ fm(Math.round(ivaMes.usoComun * ivaMes.factor)) }} de uso común
+            (${{ fm(ivaMes.usoComun) }} × factor {{ ivaMes.factor.toFixed(3) }})
+          </span>
+          <span v-if="ivaMes.sinCredito !== 0" class="detalle">
+            ${{ fm(ivaMes.sinCredito) }} de IVA pagado SIN derecho a crédito, que no se descuenta
+          </span>
         </div>
       </div>
 

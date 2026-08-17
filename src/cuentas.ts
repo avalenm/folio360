@@ -136,7 +136,19 @@ export interface ResumenCuentas {
     ranking: FilaContraparte[]
     lineas: LineaCuenta[]
   }
-  mes: { ventas: number; ivaDebito: number; ivaCredito: number; ivaNeto: number; documentos: number }
+  mes: {
+    ventas: number
+    ivaDebito: number
+    ivaCredito: number
+    ivaNeto: number
+    documentos: number
+    // Piezas del crédito que necesitan explicación: cuánto vino de compras de
+    // uso común y con qué factor se prorrateó, y cuánto IVA se pagó sin
+    // derecho a crédito (que no suma al crédito, pero se desembolsó igual).
+    ivaUsoComun: number
+    factorProporcionalidad: number
+    ivaSinDerechoACredito: number
+  }
   evolucion: { mes: string; ventas: number; compras: number; margen: number }[]
   posicionNeta: number
   ivaFinanciado: IvaFinanciado
