@@ -13,6 +13,13 @@ import { nombreCortoTipoDte } from '@/tiposDte'
 // La unidad de cuenta es la LÍNEA, no el total: cada peso del total viene de
 // un documento concreto que se puede mostrar y auditar. Un total que no se
 // puede desglosar es un total en el que no se puede confiar.
+//
+// OJO — el saldo de un documento se calcula HOY en dos lugares: acá (para los
+// tableros, que cargan la colección completa) y en el servidor (para las
+// listas, que van paginadas y no pueden ver una nota de crédito fuera de su
+// página). Las dos tienen que dar lo mismo; lo que impide que se separen es
+// `npm run verificar:saldo` en el server, que corre los casos límite. Unificarlas
+// es la etapa pendiente: mover también los totales de los tableros al servidor.
 
 // Un documento cuenta desde que se firma: antes es un borrador que todavía no
 // se cobra ni se debe. Los rechazados/anulados nunca entran.
@@ -201,24 +208,9 @@ function agruparCreditos(docs: DteDocument[]): {
   return { porDocumento, sinReferencia }
 }
 
-// Los créditos ya sumados por documento corregido, para quien solo necesita
-// descontarlos (la tabla de Documentos) y no auditar de dónde salieron.
-export function creditosPorDocumento(docs: DteDocument[]): Map<string, number> {
-  const { porDocumento } = agruparCreditos(docs)
-  return new Map([...porDocumento].map(([clave, { monto }]) => [clave, monto]))
-}
-
-// Lo que un documento tiene realmente pendiente de cobro: su total, menos lo
-// abonado, menos las notas de crédito que lo corrigen. Nunca negativo — si las
-// notas superan lo facturado, el cliente no pasa a deberte menos que cero.
-export function saldoPorCobrar(doc: DteDocument, creditos: Map<string, number>): number {
-  const credito = doc.folio != null ? (creditos.get(claveDocumento(doc.ambiente, doc.tipoDte, doc.folio)) ?? 0) : 0
-  return Math.max(0, totalClp(doc) - doc.montoPagado - credito)
-}
-
 // Una nota de crédito cuyo monto no alcanza a descontarse de ninguna factura.
-// El total por cobrar la ignora a propósito (ver saldoPorCobrar), y esa es la
-// decisión correcta: sumarla haría que la cobranza bajara para siempre. Pero
+// El total por cobrar la ignora a propósito, y esa es la decisión correcta:
+// sumarla haría que la cobranza bajara para siempre. Pero
 // ignorarla EN SILENCIO significa que una nota real puede evaporarse sin que
 // nada lo diga, así que se reporta aparte para que se vea.
 export type MotivoCreditoSinAplicar = 'sin-referencia' | 'documento-no-encontrado' | 'excede-saldo'

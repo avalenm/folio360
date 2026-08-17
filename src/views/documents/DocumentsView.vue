@@ -22,7 +22,7 @@ import AyudaPagina from '@/components/AyudaPagina.vue'
 import { AYUDA_DOCUMENTOS } from './ayuda-documentos.js'
 import type { Customer, DteDocument, DteExportacion, DteItem, DtePago, Product, Supplier, ValorUf } from '@/types'
 import { TIPOS_DTE_EMITIBLES, nombreCortoTipoDte, tipoDteCorto, tipoDteLabel } from '@/tiposDte'
-import { creditosPorDocumento, saldoPorCobrar } from '@/cuentas'
+
 import {
   CLAUSULAS_VENTA,
   FORMAS_PAGO_EXPORTACION,
@@ -168,20 +168,36 @@ function receptorOf(document: DteDocument): Customer | Supplier | undefined {
   return TIPOS_DTE_COMPRA.includes(document.tipoDte) ? supplierOf(document.supplierId) : customerOf(document.customerId)
 }
 
-// El saldo descuenta las notas de crédito que corrigen el documento, no solo
-// los abonos: sin eso esta tabla mostraba un saldo mayor que el que cuentan
-// Panorama y Finanzas para el MISMO documento, y el diálogo de pago dejaba
-// registrar un abono por una plata que el cliente ya no debía.
+// El saldo lo calcula el SERVIDOR y viene en cada documento, descontando los
+// abonos Y las notas de crédito que lo corrigen (ver saldo.ts en el server).
 //
-// Se calcula con la misma función que las cuentas por cobrar (cuentas.ts).
-// Ojo: se arma sobre los documentos cargados en esta vista, que son los 100
-// más recientes — una nota de crédito más antigua que ese corte no alcanza a
-// descontarse acá. El total de Finanzas, que carga la colección completa,
-// manda.
-const creditosDeDocumentos = computed(() => creditosPorDocumento(documents.value))
-
+// Antes se calculaba acá, sobre los documentos cargados en esta vista: una
+// nota de crédito más antigua que el corte de la lista no alcanzaba a
+// descontarse y el saldo salía inflado. El servidor siempre la encuentra,
+// esté o no en la página que se está mirando.
+//
+// El `??` cubre solo el caso de un documento que todavía no pasó por una
+// lectura del servidor; en la práctica siempre viene calculado.
 function saldoOf(document: DteDocument): number {
-  return saldoPorCobrar(document, creditosDeDocumentos.value)
+  return document.saldo ?? Math.max(0, document.montos.total - document.montoPagado)
+}
+
+// Las notas de crédito que explican por qué el saldo es menor que el total.
+// Mostrarlas no es adorno: un saldo rebajado sin motivo visible se lee como
+// un error del sistema, y con el tiempo uno deja de creerle a la cifra.
+function creditosOf(document: DteDocument): { tipoDte: number; folio: number; monto: number }[] {
+  return document.creditosAplicados ?? []
+}
+
+function totalCreditos(document: DteDocument): number {
+  return creditosOf(document).reduce((suma, credito) => suma + credito.monto, 0)
+}
+
+function glosaCreditos(document: DteDocument): string {
+  const creditos = creditosOf(document)
+  if (creditos.length === 0) return ''
+  const folios = creditos.map((c) => `N° ${c.folio}`).join(', ')
+  return creditos.length === 1 ? `menos nota de crédito ${folios}` : `menos notas de crédito ${folios}`
 }
 
 // --- Filtros (client-side: el volumen de esta app no justifica paginación
@@ -1469,8 +1485,13 @@ onMounted(async () => {
 
       <Column header="Saldo">
         <template #body="{ data }">
-          <span v-if="saldoOf(data) > 0" class="saldo-pendiente">${{ formatMoney(saldoOf(data)) }}</span>
-          <span v-else class="saldo-pagado"><i class="pi pi-check-circle" /> Pagado</span>
+          <div class="stacked-cell">
+            <span v-if="saldoOf(data) > 0" class="saldo-pendiente">${{ formatMoney(saldoOf(data)) }}</span>
+            <span v-else class="saldo-pagado"><i class="pi pi-check-circle" /> Pagado</span>
+            <!-- Por qué el saldo es menor que el total. Sin esto la rebaja
+                 parece un error del sistema. -->
+            <span v-if="creditosOf(data).length > 0" class="muted">{{ glosaCreditos(data) }}</span>
+          </div>
         </template>
       </Column>
 
@@ -2144,11 +2165,34 @@ onMounted(async () => {
             <span class="pago-resumen-label">Abonado</span>
             <span class="pago-resumen-value pago-abonado">${{ formatMoney(pagoDocument.montoPagado) }}</span>
           </div>
+          <!-- Las notas de crédito rebajan el saldo igual que un abono, así
+               que tienen que estar en el resumen: si el saldo baja y acá solo
+               figura lo abonado, la resta no cuadra y parece un error. -->
+          <div v-if="creditosOf(pagoDocument).length > 0" class="pago-resumen-item">
+            <span class="pago-resumen-label">Notas de crédito</span>
+            <span class="pago-resumen-value pago-abonado">−${{ formatMoney(totalCreditos(pagoDocument)) }}</span>
+          </div>
           <div class="pago-resumen-item">
             <span class="pago-resumen-label">Saldo pendiente</span>
             <span class="pago-resumen-value pago-saldo">${{ formatMoney(saldoOf(pagoDocument)) }}</span>
           </div>
         </div>
+
+        <section v-if="creditosOf(pagoDocument).length > 0" class="pago-section">
+          <h3 class="section-title">Notas de crédito aplicadas</h3>
+          <p class="pago-empty">
+            Rebajan lo que el cliente debe por este documento. No son abonos: no entraron como plata, corrigen
+            lo facturado.
+          </p>
+          <ul class="pago-list">
+            <li v-for="credito in creditosOf(pagoDocument)" :key="`${credito.tipoDte}-${credito.folio}`" class="pago-item">
+              <span class="pago-item-detalle">
+                <span class="pago-item-medio">{{ nombreCortoTipoDte(credito.tipoDte) }} N° {{ credito.folio }}</span>
+              </span>
+              <span class="pago-item-monto">−${{ formatMoney(credito.monto) }}</span>
+            </li>
+          </ul>
+        </section>
 
         <section class="pago-section">
           <h3 class="section-title">Historial de pagos</h3>

@@ -279,6 +279,15 @@ export interface DteDocument {
   montoPagado: number
   pagos?: DtePago[]
   ambiente: Ambiente
+  // Calculados por el SERVIDOR en cada lectura, nunca guardados (ver
+  // server/src/services/documents/saldo.ts). `saldo` es lo que queda por
+  // cobrar descontando los abonos Y las notas de crédito que corrigen el
+  // documento; `creditosAplicados` es el detalle que explica ese descuento.
+  //
+  // Vienen del servidor porque una nota de crédito es OTRO documento, que con
+  // la lista paginada puede no estar cargado: el saldo saldría inflado.
+  saldo?: number
+  creditosAplicados?: { tipoDte: number; folio: number; monto: number }[]
   trackId?: string
   envioSiiEstado?: string
   envioSiiGlosa?: string
