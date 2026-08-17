@@ -11,6 +11,8 @@ import {
   cuentasPorCobrar,
   documentosVigentes,
   esNotaDeCompra,
+  exposicionExtranjera,
+  formatMonto,
   ivaClp,
   lineasPorPagar,
   rankingDe,
@@ -119,6 +121,12 @@ const lineasPagar = computed(() => lineasPorPagar(docsEmitidos.value, purchases.
 const porCobrar = computed(() => ({ aging: agingDe(lineasCobrar.value), ranking: rankingDe(lineasCobrar.value) }))
 const porPagar = computed(() => ({ aging: agingDe(lineasPagar.value), ranking: rankingDe(lineasPagar.value) }))
 
+// Cuánto del por cobrar está en moneda extranjera. El total sigue en pesos
+// —es lo único sumable y lo que calza con el SII— pero esos pesos quedaron
+// congelados al cambio del día de emisión: si el dólar se mueve, lo que se va
+// a cobrar es otro. Esto dice qué parte del total depende de eso.
+const exposicionCobrar = computed(() => exposicionExtranjera(lineasCobrar.value))
+
 // El desglose se ordena por monto: lo que más pesa en el total es lo primero
 // que uno quiere ver cuando el número no calza con lo que esperaba.
 const desglosePagar = computed(() => [...lineasPagar.value].sort((a, b) => b.monto - a.monto))
@@ -169,7 +177,7 @@ const AYUDA_FINANZAS: SeccionAyuda[] = [
       { nombre: 'Notas de crédito', descripcion: 'Rebajan el saldo de la factura que referencian, no cuentan como línea aparte.' },
       { nombre: 'De dónde sale el "por pagar"', descripcion: 'De DOS lugares: las compras que registras (página Compras) y las facturas de compra que emites tú por cambio de sujeto, que viven en Documentos. El desglose de abajo muestra cada documento y en qué pantalla está.' },
       { nombre: 'Certificación', descripcion: 'Los documentos y compras de prueba nunca se suman a los de producción: cada uno cuenta solo en su ambiente.' },
-      { nombre: 'Exportaciones', descripcion: 'Se convierten a pesos con el tipo de cambio del documento.' },
+      { nombre: 'Exportaciones', descripcion: 'Los totales van en pesos, convertidos con el tipo de cambio del DÍA DE EMISIÓN de cada documento — es lo único sumable y lo que calza con lo que declaras al SII. Junto a cada documento se muestra su moneda real, y acá aparece aparte cuánto del total depende del tipo de cambio.' },
       { nombre: 'IVA estimado', descripcion: 'Débito (ventas del mes) menos crédito (compras del mes): lo que se pagaría en el F29. Es referencial — el definitivo depende de los tratamientos de IVA de cada compra.' },
       { nombre: 'Liquidaciones (43)', descripcion: 'No se cuentan como venta ni cobranza: su total es la rendición al mandante, no ingreso propio.' },
       { nombre: 'Posición neta', descripcion: 'Por cobrar menos por pagar: el capital de trabajo que tienes en la calle.' }
@@ -273,6 +281,18 @@ onMounted(async () => {
               <tr><td>Vencido +90 días</td><td class="num critico">${{ fm(porCobrar.aging.vMas90) }}</td></tr>
             </tbody>
           </table>
+          <div v-if="exposicionCobrar.length > 0" class="exposicion">
+            <strong>En moneda extranjera</strong>
+            <div v-for="fila in exposicionCobrar" :key="fila.moneda" class="exposicion-fila">
+              <span>{{ formatMonto(fila.monto, fila.moneda) }}</span>
+              <span class="detalle">${{ fm(fila.clp) }} al cambio de emisión</span>
+            </div>
+            <span class="detalle">
+              Ya está incluido en el total de arriba. Se muestra aparte porque esos pesos se fijaron el día de
+              emisión: lo que finalmente cobres depende de cómo se mueva la moneda.
+            </span>
+          </div>
+
           <h3>Quién te debe</h3>
           <table class="tabla-ranking">
             <tbody>
@@ -412,4 +432,6 @@ onMounted(async () => {
 .alerta { color: #b45309; }
 .critico { color: #b91c1c; font-weight: 650; }
 .vacio { color: #64748b; text-align: center; padding: 0.75rem 0; }
+.exposicion { margin-top: 1rem; padding: 0.75rem; border-radius: 8px; background: #f8fafc; display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.85rem; }
+.exposicion-fila { display: flex; justify-content: space-between; gap: 1rem; font-variant-numeric: tabular-nums; }
 </style>

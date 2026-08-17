@@ -22,6 +22,7 @@ import AyudaPagina from '@/components/AyudaPagina.vue'
 import { AYUDA_DOCUMENTOS } from './ayuda-documentos.js'
 import type { Customer, DteDocument, DteExportacion, DteItem, DtePago, Product, Supplier, ValorUf } from '@/types'
 import { TIPOS_DTE_EMITIBLES, nombreCortoTipoDte, tipoDteCorto, tipoDteLabel } from '@/tiposDte'
+import { esMonedaExtranjera, formatMonto, monedaDe, totalClp } from '@/cuentas'
 
 import {
   CLAUSULAS_VENTA,
@@ -178,8 +179,16 @@ function receptorOf(document: DteDocument): Customer | Supplier | undefined {
 //
 // El `??` cubre solo el caso de un documento que todavía no pasó por una
 // lectura del servidor; en la práctica siempre viene calculado.
+// En PESOS: la cifra sumable, la que muestran Panorama y Finanzas.
 function saldoOf(document: DteDocument): number {
-  return document.saldo ?? Math.max(0, document.montos.total - document.montoPagado)
+  return document.saldo ?? Math.max(0, totalClp(document) - document.montoPagado)
+}
+
+// En la MONEDA del documento: la que se muestra junto a él, donde poner pesos
+// contradiría lo que dice el DTE. Para todo lo que ya está en pesos las dos
+// son la misma cifra.
+function saldoOrigenOf(document: DteDocument): number {
+  return document.saldoOrigen ?? Math.max(0, document.montos.total - document.montoPagado)
 }
 
 // Las notas de crédito que explican por qué el saldo es menor que el total.
@@ -878,7 +887,7 @@ function historialBase(document: DteDocument): DtePago[] {
 
 function openPago(document: DteDocument): void {
   pagoDocument.value = document
-  pagoMonto.value = saldoOf(document)
+  pagoMonto.value = saldoOrigenOf(document)
   pagoFecha.value = new Date()
   pagoMedio.value = ''
   pagoNota.value = ''
@@ -909,10 +918,10 @@ async function confirmPago(): Promise<void> {
     pagoDocument.value = updated
     toast.add({ severity: 'success', summary: 'Pago registrado', life: 2500 })
 
-    if (saldoOf(updated) <= 0) {
+    if (saldoOrigenOf(updated) <= 0) {
       pagoVisible.value = false
     } else {
-      pagoMonto.value = saldoOf(updated)
+      pagoMonto.value = saldoOrigenOf(updated)
       pagoMedio.value = ''
       pagoNota.value = ''
     }
@@ -937,7 +946,7 @@ async function eliminarPago(index: number): Promise<void> {
     const pagos = historialBase(document).filter((_, i) => i !== index)
     const updated = await update(document._id, { pagos })
     pagoDocument.value = updated
-    pagoMonto.value = saldoOf(updated)
+    pagoMonto.value = saldoOrigenOf(updated)
     toast.add({ severity: 'success', summary: 'Abono eliminado', life: 2500 })
   } catch (e) {
     toast.add({
@@ -1477,8 +1486,10 @@ onMounted(async () => {
       <Column header="Monto">
         <template #body="{ data }">
           <div class="stacked-cell">
-            <strong>${{ formatMoney(data.montos.total) }}</strong>
-            <span class="muted">IVA ${{ formatMoney(data.montos.iva) }}</span>
+            <!-- En la moneda del documento: una exportación en dólares con un
+                 signo $ delante se lee como pesos y no lo es. -->
+            <strong>{{ formatMonto(data.montos.total, monedaDe(data)) }}</strong>
+            <span v-if="!esMonedaExtranjera(data)" class="muted">IVA ${{ formatMoney(data.montos.iva) }}</span>
           </div>
         </template>
       </Column>
@@ -1486,11 +1497,21 @@ onMounted(async () => {
       <Column header="Saldo">
         <template #body="{ data }">
           <div class="stacked-cell">
-            <span v-if="saldoOf(data) > 0" class="saldo-pendiente">${{ formatMoney(saldoOf(data)) }}</span>
+            <!-- El saldo va en la moneda del documento, para que se pueda
+                 comparar con el monto de al lado sin traducir nada. -->
+            <span v-if="saldoOrigenOf(data) > 0" class="saldo-pendiente">
+              {{ formatMonto(saldoOrigenOf(data), monedaDe(data)) }}
+            </span>
             <span v-else class="saldo-pagado"><i class="pi pi-check-circle" /> Pagado</span>
             <!-- Por qué el saldo es menor que el total. Sin esto la rebaja
                  parece un error del sistema. -->
             <span v-if="creditosOf(data).length > 0" class="muted">{{ glosaCreditos(data) }}</span>
+            <!-- En moneda extranjera se muestra además el equivalente en
+                 pesos y el cambio con que se calculó: es la cifra que suman
+                 el Panorama y Finanzas, y así se puede auditar. -->
+            <span v-if="esMonedaExtranjera(data) && saldoOrigenOf(data) > 0" class="muted">
+              ${{ formatMoney(saldoOf(data)) }} al cambio {{ formatMoney(data.exportacion?.tipoCambio ?? 0) }}
+            </span>
           </div>
         </template>
       </Column>
@@ -2157,24 +2178,35 @@ onMounted(async () => {
     <Dialog v-model:visible="pagoVisible" modal header="Pagos del documento" style="width: 560px">
       <div v-if="pagoDocument" class="pago-body">
         <div class="pago-resumen">
+          <!-- Todo el diálogo va en la MONEDA del documento: los abonos de una
+               exportación se registran en su moneda, no en pesos. Mostrar el
+               total en dólares y el saldo en pesos hacía que la resta no
+               cuadrara a la vista. -->
           <div class="pago-resumen-item">
             <span class="pago-resumen-label">Total documento</span>
-            <span class="pago-resumen-value">${{ formatMoney(pagoDocument.montos.total) }}</span>
+            <span class="pago-resumen-value">{{ formatMonto(pagoDocument.montos.total, monedaDe(pagoDocument)) }}</span>
           </div>
           <div class="pago-resumen-item">
             <span class="pago-resumen-label">Abonado</span>
-            <span class="pago-resumen-value pago-abonado">${{ formatMoney(pagoDocument.montoPagado) }}</span>
+            <span class="pago-resumen-value pago-abonado">{{ formatMonto(pagoDocument.montoPagado, monedaDe(pagoDocument)) }}</span>
           </div>
           <!-- Las notas de crédito rebajan el saldo igual que un abono, así
                que tienen que estar en el resumen: si el saldo baja y acá solo
                figura lo abonado, la resta no cuadra y parece un error. -->
           <div v-if="creditosOf(pagoDocument).length > 0" class="pago-resumen-item">
             <span class="pago-resumen-label">Notas de crédito</span>
-            <span class="pago-resumen-value pago-abonado">−${{ formatMoney(totalCreditos(pagoDocument)) }}</span>
+            <span class="pago-resumen-value pago-abonado">−{{ formatMonto(totalCreditos(pagoDocument), monedaDe(pagoDocument)) }}</span>
           </div>
           <div class="pago-resumen-item">
             <span class="pago-resumen-label">Saldo pendiente</span>
-            <span class="pago-resumen-value pago-saldo">${{ formatMoney(saldoOf(pagoDocument)) }}</span>
+            <span class="pago-resumen-value pago-saldo">{{ formatMonto(saldoOrigenOf(pagoDocument), monedaDe(pagoDocument)) }}</span>
+          </div>
+          <div v-if="esMonedaExtranjera(pagoDocument)" class="pago-resumen-item">
+            <span class="pago-resumen-label">Equivale a</span>
+            <span class="pago-resumen-value">
+              ${{ formatMoney(saldoOf(pagoDocument)) }}
+              <span class="muted">al cambio {{ formatMoney(pagoDocument.exportacion?.tipoCambio ?? 0) }} del día de emisión</span>
+            </span>
           </div>
         </div>
 
@@ -2189,7 +2221,7 @@ onMounted(async () => {
               <span class="pago-item-detalle">
                 <span class="pago-item-medio">{{ nombreCortoTipoDte(credito.tipoDte) }} N° {{ credito.folio }}</span>
               </span>
-              <span class="pago-item-monto">−${{ formatMoney(credito.monto) }}</span>
+              <span class="pago-item-monto">−{{ formatMonto(credito.monto, monedaDe(pagoDocument)) }}</span>
             </li>
           </ul>
         </section>
@@ -2210,7 +2242,7 @@ onMounted(async () => {
                 <span class="pago-item-medio">{{ pago.medio || '—' }}</span>
                 <span v-if="pago.nota" class="pago-item-nota">{{ pago.nota }}</span>
               </span>
-              <span class="pago-item-monto">${{ formatMoney(pago.monto) }}</span>
+              <span class="pago-item-monto">{{ formatMonto(pago.monto, monedaDe(pagoDocument)) }}</span>
               <Button
                 icon="pi pi-times"
                 text
@@ -2223,12 +2255,19 @@ onMounted(async () => {
           </ul>
         </section>
 
-        <section v-if="saldoOf(pagoDocument) > 0" class="pago-section">
+        <section v-if="saldoOrigenOf(pagoDocument) > 0" class="pago-section">
           <h3 class="section-title">Registrar nuevo abono</h3>
           <div class="pago-form">
             <label class="field">
               <span>Monto</span>
-              <InputNumber v-model="pagoMonto" :min="0" :max="saldoOf(pagoDocument)" mode="decimal" />
+              <InputNumber
+                v-model="pagoMonto"
+                :min="0"
+                :max="saldoOrigenOf(pagoDocument)"
+                mode="decimal"
+                :max-fraction-digits="esMonedaExtranjera(pagoDocument) ? 2 : 0"
+                :suffix="esMonedaExtranjera(pagoDocument) ? ` ${monedaDe(pagoDocument)}` : ''"
+              />
             </label>
             <label class="field">
               <span>Fecha</span>

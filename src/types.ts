@@ -286,7 +286,13 @@ export interface DteDocument {
   //
   // Vienen del servidor porque una nota de crédito es OTRO documento, que con
   // la lista paginada puede no estar cargado: el saldo saldría inflado.
+  // `saldo` va SIEMPRE en pesos: es la cifra sumable y la que calza con lo
+  // que se le declara al SII. `saldoOrigen` y los montos de
+  // `creditosAplicados` van en la MONEDA del documento — son los que se
+  // muestran junto al documento, donde poner pesos sería contradecir lo que
+  // dice el DTE.
   saldo?: number
+  saldoOrigen?: number
   creditosAplicados?: { tipoDte: number; folio: number; monto: number }[]
   trackId?: string
   envioSiiEstado?: string

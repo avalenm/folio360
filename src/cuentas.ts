@@ -48,18 +48,44 @@ const PLAZO_LEGAL_DIAS = 30
 const DIA_MS = 24 * 60 * 60 * 1000
 
 // Los documentos de exportación llevan sus montos en la MONEDA de la
-// operación: se convierten a pesos con su tipo de cambio antes de sumarlos —
-// mezclar dólares con pesos daría totales mentirosos.
+// operación. Para sumarlos con el resto hay que pasarlos a pesos: mezclar
+// dólares con pesos daría totales mentirosos, y además los pesos son lo único
+// que calza con lo que se le declara al SII.
 //
 // Una exportación en PESO CL no lleva tipo de cambio (el SII solo exige la
 // sección OtraMoneda cuando la moneda es extranjera), y sus montos YA están
 // en pesos: el factor es 1. Antes se usaba 0 y esas facturas desaparecían
 // enteras de las cuentas por cobrar, sin dejar rastro de por qué.
+
+// La moneda en que está expresado el documento. 'CLP' para todo lo que no es
+// exportación en moneda extranjera.
+export const MONEDA_LOCAL = 'CLP'
+
+export function monedaDe(doc: DteDocument): string {
+  if (!TIPOS_EXPORTACION.includes(doc.tipoDte)) return MONEDA_LOCAL
+  const moneda = doc.exportacion?.moneda
+  return !moneda || moneda === 'PESO CL' ? MONEDA_LOCAL : moneda
+}
+
+export function esMonedaExtranjera(doc: DteDocument): boolean {
+  return monedaDe(doc) !== MONEDA_LOCAL
+}
+
+// Pesos por unidad de la moneda del documento.
+export function factorClp(doc: DteDocument): number {
+  return esMonedaExtranjera(doc) ? (doc.exportacion?.tipoCambio ?? 0) : 1
+}
+
 export function totalClp(doc: DteDocument): number {
-  if (!TIPOS_EXPORTACION.includes(doc.tipoDte)) return doc.montos.total
-  const exportacion = doc.exportacion
-  const cambio = exportacion?.moneda === 'PESO CL' ? 1 : (exportacion?.tipoCambio ?? 0)
-  return Math.round(doc.montos.total * cambio)
+  return Math.round(doc.montos.total * factorClp(doc))
+}
+
+// Un monto con su moneda. Los pesos no llevan decimales (el SII los exige
+// enteros); la moneda extranjera sí, porque ahí el DTE los declara.
+export function formatMonto(monto: number, moneda: string): string {
+  return moneda === MONEDA_LOCAL
+    ? `$${Math.round(monto).toLocaleString('es-CL')}`
+    : `${monto.toLocaleString('es-CL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${moneda}`
 }
 
 export function ivaClp(doc: DteDocument): number {
@@ -90,10 +116,34 @@ export interface LineaCuenta {
   id: string
   descripcion: string
   contraparte: string
-  // Positivo si suma deuda/cobranza, negativo si la rebaja (nota de crédito).
+  // SIEMPRE en pesos, positivo si suma deuda/cobranza y negativo si la rebaja
+  // (nota de crédito). Es lo único sumable entre documentos.
   monto: number
+  // La moneda en que se emitió el documento, y cuánto se debe en ella. Solo
+  // vienen en moneda extranjera: el `monto` en pesos quedó congelado al
+  // cambio del día de emisión, así que no es lo que se va a cobrar si la
+  // moneda se mueve.
+  moneda?: string
+  montoOrigen?: number
   vencimiento: Date
   verEn: 'documentos' | 'compras'
+}
+
+// Cuánto del total está expresado en cada moneda extranjera. No reemplaza al
+// total en pesos —ese es el que calza con el SII— sino que dice qué parte de
+// él depende del tipo de cambio.
+export function exposicionExtranjera(lineas: LineaCuenta[]): { moneda: string; monto: number; clp: number }[] {
+  const porMoneda = new Map<string, { moneda: string; monto: number; clp: number }>()
+
+  for (const linea of lineas) {
+    if (!linea.moneda || linea.moneda === MONEDA_LOCAL || linea.montoOrigen === undefined) continue
+    const fila = porMoneda.get(linea.moneda) ?? { moneda: linea.moneda, monto: 0, clp: 0 }
+    fila.monto += linea.montoOrigen
+    fila.clp += linea.monto
+    porMoneda.set(linea.moneda, fila)
+  }
+
+  return [...porMoneda.values()].sort((a, b) => b.clp - a.clp)
 }
 
 export interface Aging {
@@ -198,9 +248,13 @@ function agruparCreditos(docs: DteDocument[]): {
       continue
     }
 
+    // En la moneda de la nota, que es la del documento que corrige: la deuda
+    // se rebaja en la moneda en que se pactó y recién el saldo final pasa a
+    // pesos. Convertir cada nota con SU tipo de cambio —que puede diferir del
+    // de la factura— mezclaría dos cambios distintos en una misma deuda.
     const clave = claveDocumento(doc.ambiente, referencia.tipoDteRef as number, referencia.folioRef)
     const agrupado = porDocumento.get(clave) ?? { monto: 0, notas: [] }
-    agrupado.monto += totalClp(doc)
+    agrupado.monto += doc.montos.total
     agrupado.notas.push(doc)
     porDocumento.set(clave, agrupado)
   }
@@ -251,20 +305,28 @@ export function cuentasPorCobrar(docs: DteDocument[], customers: Customer[]): Cu
   for (const doc of docs) {
     if (!esVentaCobrable(doc)) continue
 
+    // Todo se resta en la MONEDA del documento —total, abonos y notas son la
+    // misma deuda— y la conversión a pesos ocurre una sola vez, al final.
     const clave = doc.folio != null ? claveDocumento(doc.ambiente, doc.tipoDte, doc.folio) : null
     const credito = clave ? (porDocumento.get(clave)?.monto ?? 0) : 0
-    const bruto = Math.max(0, totalClp(doc) - doc.montoPagado)
+    const bruto = Math.max(0, doc.montos.total - doc.montoPagado)
     if (clave) aplicado.set(clave, Math.min(credito, bruto))
 
-    const saldo = bruto - Math.min(credito, bruto)
-    if (saldo <= 0) continue
+    const saldoOrigen = bruto - Math.min(credito, bruto)
+    if (saldoOrigen <= 0) continue
 
     const cliente = customers.find((c) => c._id === doc.customerId)
+    const moneda = monedaDe(doc)
     lineas.push({
       id: doc._id,
       descripcion: descripcionDe(doc),
       contraparte: cliente?.razonSocial ?? 'Sin cliente',
-      monto: saldo,
+      monto: Math.round(saldoOrigen * factorClp(doc)),
+      moneda,
+      // Lo que se debe en la moneda del documento. Se conserva porque el
+      // monto en pesos quedó fijado al cambio del día de emisión: si el dólar
+      // se mueve, lo que realmente se va a cobrar es otro.
+      montoOrigen: moneda === MONEDA_LOCAL ? undefined : saldoOrigen,
       // El plazo pactado con ese cliente manda; el default es el legal de 30
       // días (Ley 21.131).
       vencimiento: vencimientoA(fechaDoc(doc), cliente?.plazoPagoDias ?? PLAZO_LEGAL_DIAS),

@@ -10,6 +10,8 @@ import { useAuthStore } from '@/stores/auth'
 import type { Customer, DteDocument, IncomingInvoice, Paginated, Purchase, Supplier } from '@/types'
 import {
   cuentasPorCobrar,
+  exposicionExtranjera,
+  formatMonto,
   documentosVigentes,
   esNotaDeCompra,
   ivaClp,
@@ -77,6 +79,11 @@ const cobrar = computed(() => cuentasPorCobrar(documentosEmitidos.value, custome
 const pagar = computed(() => lineasPorPagar(documentosEmitidos.value, purchases.value, suppliers.value))
 
 const porCobrar = computed(() => totalDe(cobrar.value))
+
+// Qué parte del por cobrar está en moneda extranjera: ese pedazo del total
+// quedó fijado al cambio del día de emisión, así que no es exactamente lo que
+// se va a cobrar. El detalle está en Finanzas.
+const exposicionCobrar = computed(() => exposicionExtranjera(cobrar.value))
 const porPagar = computed(() => totalDe(pagar.value))
 
 function formatCurrency(value: number): string {
@@ -117,7 +124,10 @@ const statsAcumulado = computed(() => [
     icon: 'pi-wallet',
     tone: 'success',
     hint: 'TODO lo impago histórico (sin límite de período), neto de notas de crédito y abonos — por eso puede superar a las ventas del mes. El detalle documento por documento está en Finanzas.',
-    note: `${cobrar.value.length} documentos`,
+    note:
+      exposicionCobrar.value.length > 0
+        ? `${cobrar.value.length} documentos · incluye ${exposicionCobrar.value.map((e) => formatMonto(e.monto, e.moneda)).join(' + ')}`
+        : `${cobrar.value.length} documentos`,
     to: '/finanzas',
     linkLabel: 'Ver en Finanzas'
   },
