@@ -22,6 +22,7 @@ import AyudaPagina from '@/components/AyudaPagina.vue'
 import { AYUDA_DOCUMENTOS } from './ayuda-documentos.js'
 import type { Customer, DteDocument, DteExportacion, DteItem, DtePago, Product, Supplier, ValorUf } from '@/types'
 import { TIPOS_DTE_EMITIBLES, nombreCortoTipoDte, tipoDteCorto, tipoDteLabel } from '@/tiposDte'
+import { creditosPorDocumento, saldoPorCobrar } from '@/cuentas'
 import {
   CLAUSULAS_VENTA,
   FORMAS_PAGO_EXPORTACION,
@@ -167,8 +168,20 @@ function receptorOf(document: DteDocument): Customer | Supplier | undefined {
   return TIPOS_DTE_COMPRA.includes(document.tipoDte) ? supplierOf(document.supplierId) : customerOf(document.customerId)
 }
 
+// El saldo descuenta las notas de crédito que corrigen el documento, no solo
+// los abonos: sin eso esta tabla mostraba un saldo mayor que el que cuentan
+// Panorama y Finanzas para el MISMO documento, y el diálogo de pago dejaba
+// registrar un abono por una plata que el cliente ya no debía.
+//
+// Se calcula con la misma función que las cuentas por cobrar (cuentas.ts).
+// Ojo: se arma sobre los documentos cargados en esta vista, que son los 100
+// más recientes — una nota de crédito más antigua que ese corte no alcanza a
+// descontarse acá. El total de Finanzas, que carga la colección completa,
+// manda.
+const creditosDeDocumentos = computed(() => creditosPorDocumento(documents.value))
+
 function saldoOf(document: DteDocument): number {
-  return document.montos.total - document.montoPagado
+  return saldoPorCobrar(document, creditosDeDocumentos.value)
 }
 
 // --- Filtros (client-side: el volumen de esta app no justifica paginación

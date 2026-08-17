@@ -6,11 +6,12 @@ import { useAuthStore } from '@/stores/auth'
 import type { Customer, DteDocument, Paginated, Purchase, Supplier } from '@/types'
 import type { SeccionAyuda } from '@/components/AyudaPagina.vue'
 import {
+  GLOSA_CREDITO_SIN_APLICAR,
   agingDe,
+  cuentasPorCobrar,
   documentosVigentes,
   esNotaDeCompra,
   ivaClp,
-  lineasPorCobrar,
   lineasPorPagar,
   rankingDe,
   signoVenta,
@@ -111,7 +112,8 @@ const evolucion = computed(() => {
 // Las líneas son la unidad: el aging, el ranking por contraparte y el
 // desglose de abajo salen todos de la MISMA lista que suma el total, así que
 // no pueden contradecirse entre sí ni contra el Panorama (ver cuentas.ts).
-const lineasCobrar = computed(() => lineasPorCobrar(docsEmitidos.value, customers.value))
+const cobranza = computed(() => cuentasPorCobrar(docsEmitidos.value, customers.value))
+const lineasCobrar = computed(() => cobranza.value.lineas)
 const lineasPagar = computed(() => lineasPorPagar(docsEmitidos.value, purchases.value, suppliers.value))
 
 const porCobrar = computed(() => ({ aging: agingDe(lineasCobrar.value), ranking: rankingDe(lineasCobrar.value) }))
@@ -282,6 +284,28 @@ onMounted(async () => {
               <tr v-if="porCobrar.ranking.length === 0"><td colspan="3" class="vacio">Nada pendiente de cobro 🎉</td></tr>
             </tbody>
           </table>
+
+          <!-- Notas de crédito que no alcanzaron a descontarse de ninguna
+               factura. No entran al total a propósito (rebajarían la cobranza
+               para siempre), pero tampoco pueden desaparecer sin decir nada:
+               son plata a favor del cliente que no está reflejada. -->
+          <template v-if="cobranza.creditosSinAplicar.length > 0">
+            <h3>Notas de crédito sin aplicar</h3>
+            <p class="detalle">
+              No se descuentan del total de arriba porque no se pudieron asociar a un saldo por cobrar. Vale la pena
+              revisarlas.
+            </p>
+            <table class="tabla-ranking">
+              <tbody>
+                <tr v-for="credito in cobranza.creditosSinAplicar" :key="credito.id">
+                  <td>{{ credito.descripcion }}</td>
+                  <td>{{ credito.contraparte }}</td>
+                  <td class="num">${{ fm(credito.monto) }}</td>
+                  <td class="detalle">{{ GLOSA_CREDITO_SIN_APLICAR[credito.motivo] }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </template>
         </section>
 
         <section class="panel">

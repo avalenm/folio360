@@ -43,8 +43,15 @@ const DIA_MS = 24 * 60 * 60 * 1000
 // Los documentos de exportación llevan sus montos en la MONEDA de la
 // operación: se convierten a pesos con su tipo de cambio antes de sumarlos —
 // mezclar dólares con pesos daría totales mentirosos.
+//
+// Una exportación en PESO CL no lleva tipo de cambio (el SII solo exige la
+// sección OtraMoneda cuando la moneda es extranjera), y sus montos YA están
+// en pesos: el factor es 1. Antes se usaba 0 y esas facturas desaparecían
+// enteras de las cuentas por cobrar, sin dejar rastro de por qué.
 export function totalClp(doc: DteDocument): number {
-  const cambio = TIPOS_EXPORTACION.includes(doc.tipoDte) ? (doc.exportacion?.tipoCambio ?? 0) : 1
+  if (!TIPOS_EXPORTACION.includes(doc.tipoDte)) return doc.montos.total
+  const exportacion = doc.exportacion
+  const cambio = exportacion?.moneda === 'PESO CL' ? 1 : (exportacion?.tipoCambio ?? 0)
   return Math.round(doc.montos.total * cambio)
 }
 
@@ -144,44 +151,126 @@ function vencimientoA(desde: Date, dias: number): Date {
 
 // ---- Cuentas por cobrar ----
 
+// La clave con que una nota de crédito encuentra el documento que corrige.
+// Lleva el ambiente porque el folio solo es único dentro de su ambiente: sin
+// eso, una nota de certificación podría rebajar una factura de producción con
+// el mismo tipo y folio.
+function claveDocumento(ambiente: string, tipoDte: number | string, folio: number | string): string {
+  return `${ambiente}-${tipoDte}-${folio}`
+}
+
+function esVentaCobrable(doc: DteDocument): boolean {
+  // El 46 es deuda nuestra con el proveedor, no algo por cobrar.
+  return signoVenta(doc.tipoDte) > 0 && doc.tipoDte !== 46 && !esNotaDeCompra(doc)
+}
+
+interface CreditoAgrupado {
+  monto: number
+  notas: DteDocument[]
+}
+
 // Una nota de crédito no es una línea suelta por cobrar: rebaja el saldo de la
 // factura que referencia. Restada por su cuenta seguiría restando para siempre
 // incluso después de que esa factura quedó pagada, y la cobranza terminaría en
 // negativo.
-function creditosPorDocumento(docs: DteDocument[]): Map<string, number> {
-  const porDocumento = new Map<string, number>()
+function agruparCreditos(docs: DteDocument[]): {
+  porDocumento: Map<string, CreditoAgrupado>
+  sinReferencia: DteDocument[]
+} {
+  const porDocumento = new Map<string, CreditoAgrupado>()
+  const sinReferencia: DteDocument[] = []
 
   for (const doc of docs) {
-    if (!restaDeuda(doc) || esNotaDeCompra(doc)) continue
+    if (!restaDeuda(doc) || esNotaDeCompra(doc) || !ESTADOS_EMITIDOS.includes(doc.estado)) continue
 
     // La primera referencia a un documento real: en certificación la primera
     // es "SET", que no apunta a ningún folio nuestro.
     const referencia = (doc.referencias ?? []).find((ref) => typeof ref.tipoDteRef === 'number' && ref.tipoDteRef < 800)
-    if (!referencia) continue
+    if (!referencia) {
+      sinReferencia.push(doc)
+      continue
+    }
 
-    const clave = `${referencia.tipoDteRef}-${referencia.folioRef}`
-    porDocumento.set(clave, (porDocumento.get(clave) ?? 0) + totalClp(doc))
+    const clave = claveDocumento(doc.ambiente, referencia.tipoDteRef as number, referencia.folioRef)
+    const agrupado = porDocumento.get(clave) ?? { monto: 0, notas: [] }
+    agrupado.monto += totalClp(doc)
+    agrupado.notas.push(doc)
+    porDocumento.set(clave, agrupado)
   }
 
-  return porDocumento
+  return { porDocumento, sinReferencia }
 }
 
-export function lineasPorCobrar(docs: DteDocument[], customers: Customer[]): LineaCuenta[] {
-  const creditos = creditosPorDocumento(docs)
+// Los créditos ya sumados por documento corregido, para quien solo necesita
+// descontarlos (la tabla de Documentos) y no auditar de dónde salieron.
+export function creditosPorDocumento(docs: DteDocument[]): Map<string, number> {
+  const { porDocumento } = agruparCreditos(docs)
+  return new Map([...porDocumento].map(([clave, { monto }]) => [clave, monto]))
+}
+
+// Lo que un documento tiene realmente pendiente de cobro: su total, menos lo
+// abonado, menos las notas de crédito que lo corrigen. Nunca negativo — si las
+// notas superan lo facturado, el cliente no pasa a deberte menos que cero.
+export function saldoPorCobrar(doc: DteDocument, creditos: Map<string, number>): number {
+  const credito = doc.folio != null ? (creditos.get(claveDocumento(doc.ambiente, doc.tipoDte, doc.folio)) ?? 0) : 0
+  return Math.max(0, totalClp(doc) - doc.montoPagado - credito)
+}
+
+// Una nota de crédito cuyo monto no alcanza a descontarse de ninguna factura.
+// El total por cobrar la ignora a propósito (ver saldoPorCobrar), y esa es la
+// decisión correcta: sumarla haría que la cobranza bajara para siempre. Pero
+// ignorarla EN SILENCIO significa que una nota real puede evaporarse sin que
+// nada lo diga, así que se reporta aparte para que se vea.
+export type MotivoCreditoSinAplicar = 'sin-referencia' | 'documento-no-encontrado' | 'excede-saldo'
+
+export const GLOSA_CREDITO_SIN_APLICAR: Record<MotivoCreditoSinAplicar, string> = {
+  'sin-referencia': 'No referencia ningún documento',
+  // Puede ser que el documento no exista entre los emitidos, o que exista y
+  // no sea algo por cobrar (una guía, por ejemplo) — la glosa cubre las dos.
+  'documento-no-encontrado': 'El documento que corrige no es una venta por cobrar',
+  'excede-saldo': 'Supera lo que quedaba por cobrar de ese documento'
+}
+
+export interface CreditoSinAplicar {
+  id: string
+  descripcion: string
+  contraparte: string
+  monto: number
+  motivo: MotivoCreditoSinAplicar
+}
+
+export interface CuentasPorCobrar {
+  lineas: LineaCuenta[]
+  creditosSinAplicar: CreditoSinAplicar[]
+}
+
+export function cuentasPorCobrar(docs: DteDocument[], customers: Customer[]): CuentasPorCobrar {
+  const { porDocumento, sinReferencia } = agruparCreditos(docs)
+  const nombreCliente = (id: string | undefined): string =>
+    customers.find((c) => c._id === id)?.razonSocial ?? 'Sin cliente'
+  const descripcionDe = (doc: DteDocument): string =>
+    `${nombreCortoTipoDte(doc.tipoDte)} N° ${doc.folio ?? '—'}`
+
   const lineas: LineaCuenta[] = []
+  // Cuánto crédito alcanzó a descontarse de cada documento: lo que sobre es
+  // lo que hay que reportar.
+  const aplicado = new Map<string, number>()
 
   for (const doc of docs) {
-    // El 46 es deuda nuestra con el proveedor, no algo por cobrar.
-    if (signoVenta(doc.tipoDte) <= 0 || doc.tipoDte === 46 || esNotaDeCompra(doc)) continue
+    if (!esVentaCobrable(doc)) continue
 
-    const credito = doc.folio != null ? (creditos.get(`${doc.tipoDte}-${doc.folio}`) ?? 0) : 0
-    const saldo = Math.max(0, totalClp(doc) - doc.montoPagado - credito)
+    const clave = doc.folio != null ? claveDocumento(doc.ambiente, doc.tipoDte, doc.folio) : null
+    const credito = clave ? (porDocumento.get(clave)?.monto ?? 0) : 0
+    const bruto = Math.max(0, totalClp(doc) - doc.montoPagado)
+    if (clave) aplicado.set(clave, Math.min(credito, bruto))
+
+    const saldo = bruto - Math.min(credito, bruto)
     if (saldo <= 0) continue
 
     const cliente = customers.find((c) => c._id === doc.customerId)
     lineas.push({
       id: doc._id,
-      descripcion: `${nombreCortoTipoDte(doc.tipoDte)} N° ${doc.folio ?? '—'}`,
+      descripcion: descripcionDe(doc),
       contraparte: cliente?.razonSocial ?? 'Sin cliente',
       monto: saldo,
       // El plazo pactado con ese cliente manda; el default es el legal de 30
@@ -191,7 +280,47 @@ export function lineasPorCobrar(docs: DteDocument[], customers: Customer[]): Lin
     })
   }
 
-  return lineas
+  const creditosSinAplicar: CreditoSinAplicar[] = sinReferencia.map((nota) => ({
+    id: nota._id,
+    descripcion: descripcionDe(nota),
+    contraparte: nombreCliente(nota.customerId),
+    monto: totalClp(nota),
+    motivo: 'sin-referencia'
+  }))
+
+  for (const [clave, { monto, notas }] of porDocumento) {
+    if (!aplicado.has(clave)) {
+      // Ninguna factura respondió a esa referencia: se reporta cada nota
+      // entera, que es la unidad que el usuario puede ir a revisar.
+      for (const nota of notas) {
+        creditosSinAplicar.push({
+          id: nota._id,
+          descripcion: descripcionDe(nota),
+          contraparte: nombreCliente(nota.customerId),
+          monto: totalClp(nota),
+          motivo: 'documento-no-encontrado'
+        })
+      }
+      continue
+    }
+
+    // Acá el sobrante es del conjunto de notas sobre ese documento, no de una
+    // en particular, así que se reporta por documento corregido.
+    const sobrante = monto - (aplicado.get(clave) ?? 0)
+    if (sobrante <= 0) continue
+
+    const primera = notas[0]
+    creditosSinAplicar.push({
+      id: clave,
+      descripcion:
+        notas.length === 1 ? descripcionDe(primera) : `${notas.length} notas de crédito sobre un mismo documento`,
+      contraparte: nombreCliente(primera.customerId),
+      monto: sobrante,
+      motivo: 'excede-saldo'
+    })
+  }
+
+  return { lineas, creditosSinAplicar }
 }
 
 // ---- Cuentas por pagar ----

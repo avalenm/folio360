@@ -9,10 +9,10 @@ import { feathersClient } from '@/services/feathers'
 import { useAuthStore } from '@/stores/auth'
 import type { Customer, DteDocument, IncomingInvoice, Paginated, Purchase, Supplier } from '@/types'
 import {
+  cuentasPorCobrar,
   documentosVigentes,
   esNotaDeCompra,
   ivaClp,
-  lineasPorCobrar,
   lineasPorPagar,
   signoVenta,
   totalClp,
@@ -73,7 +73,7 @@ const ivaDelMes = computed(() =>
 // Por cobrar y por pagar, línea por línea: cada peso del total viene de un
 // documento concreto, y las reglas de cuál suma y cuál resta viven todas en
 // cuentas.ts.
-const cobrar = computed(() => lineasPorCobrar(documentosEmitidos.value, customers.value))
+const cobrar = computed(() => cuentasPorCobrar(documentosEmitidos.value, customers.value).lineas)
 const pagar = computed(() => lineasPorPagar(documentosEmitidos.value, purchases.value, suppliers.value))
 
 const porCobrar = computed(() => totalDe(cobrar.value))
