@@ -18,6 +18,11 @@ export interface Organization {
   // PDF — Manual de Muestras Impresas 1.1.3.
   logoPng?: string
   dbName: string
+  // Resolución del SII que autoriza a emitir. NroResol=0 es la convención
+  // para quienes se acogen a la resolución general — ver organization.model.ts
+  // en el servidor. Va en la Carátula de los envíos y en el pie del PDF.
+  resolucionNumero?: number
+  resolucionFecha?: string
   ambiente: Ambiente
   estado: 'onboarding' | 'activo' | 'suspendido'
   createdAt: string
