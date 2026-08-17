@@ -7,19 +7,8 @@ import { useConfirm } from 'primevue/useconfirm'
 import { useToast } from 'primevue/usetoast'
 import { feathersClient } from '@/services/feathers'
 import { useAuthStore } from '@/stores/auth'
-import type { Customer, DteDocument, IncomingInvoice, Paginated, Purchase, Supplier } from '@/types'
-import {
-  cuentasPorCobrar,
-  exposicionExtranjera,
-  formatMonto,
-  documentosVigentes,
-  esNotaDeCompra,
-  ivaClp,
-  lineasPorPagar,
-  signoVenta,
-  totalClp,
-  totalDe
-} from '@/cuentas'
+import type { DteDocument, IncomingInvoice, Paginated, Purchase, Supplier } from '@/types'
+import { formatMonto, type ResumenCuentas } from '@/cuentas'
 
 const auth = useAuthStore()
 const confirm = useConfirm()
@@ -27,7 +16,6 @@ const toast = useToast()
 const documents = ref<DteDocument[]>([])
 const purchases = ref<Purchase[]>([])
 const suppliers = ref<Supplier[]>([])
-const customers = ref<Customer[]>([])
 const incomingInvoices = ref<IncomingInvoice[]>([])
 const loading = ref(true)
 
@@ -38,53 +26,21 @@ const tipoDteLabel: Record<number, string> = {
   61: 'Nota de crédito'
 }
 
-function isSameMonth(dateStr: string): boolean {
-  const date = new Date(dateStr)
-  const now = new Date()
-  return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth()
-}
+// Las cifras las calcula el SERVIDOR y llegan sumadas (ver
+// server/src/services/cuentas/calculo.ts). Esta pantalla ya no se trae la
+// colección de documentos para sumarla: pide un objeto con números.
+const resumen = ref<ResumenCuentas | null>(null)
 
-// La base de TODAS las cifras de esta pantalla: los documentos emitidos del
-// ambiente en que está la organización (los de certificación son pruebas y no
-// pueden mezclarse con los de producción). Lo decide cuentas.ts, la misma
-// función que usa Finanzas, para que las dos pantallas no puedan volver a
-// mostrar totales distintos.
-const documentosEmitidos = computed(() =>
-  documentosVigentes(documents.value, auth.currentOrganization?.ambiente)
-)
-
-// El período tributario lo marca la fecha de EMISIÓN, no cuándo se creó el
-// borrador: un documento preparado a fin de mes y emitido al mes siguiente
-// pertenece al mes en que se emitió.
-const documentosDelMes = computed(() =>
-  documentosEmitidos.value.filter(
-    (doc) =>
-      signoVenta(doc.tipoDte) !== 0 &&
-      !esNotaDeCompra(doc) &&
-      isSameMonth(doc.fechaEmision ?? doc.createdAt)
-  )
-)
-
-const ventasDelMes = computed(() =>
-  documentosDelMes.value.reduce((sum, doc) => sum + signoVenta(doc.tipoDte) * totalClp(doc), 0)
-)
-const ivaDelMes = computed(() =>
-  documentosDelMes.value.reduce((sum, doc) => sum + signoVenta(doc.tipoDte) * ivaClp(doc), 0)
-)
-
-// Por cobrar y por pagar, línea por línea: cada peso del total viene de un
-// documento concreto, y las reglas de cuál suma y cuál resta viven todas en
-// cuentas.ts.
-const cobrar = computed(() => cuentasPorCobrar(documentosEmitidos.value, customers.value).lineas)
-const pagar = computed(() => lineasPorPagar(documentosEmitidos.value, purchases.value, suppliers.value))
-
-const porCobrar = computed(() => totalDe(cobrar.value))
+const ventasDelMes = computed(() => resumen.value?.mes.ventas ?? 0)
+const ivaDelMes = computed(() => resumen.value?.mes.ivaDebito ?? 0)
+const documentosDelMes = computed(() => resumen.value?.mes.documentos ?? 0)
+const porCobrar = computed(() => resumen.value?.porCobrar.total ?? 0)
+const porPagar = computed(() => resumen.value?.porPagar.total ?? 0)
 
 // Qué parte del por cobrar está en moneda extranjera: ese pedazo del total
 // quedó fijado al cambio del día de emisión, así que no es exactamente lo que
 // se va a cobrar. El detalle está en Finanzas.
-const exposicionCobrar = computed(() => exposicionExtranjera(cobrar.value))
-const porPagar = computed(() => totalDe(pagar.value))
+const exposicionCobrar = computed(() => resumen.value?.porCobrar.exposicion ?? [])
 
 function formatCurrency(value: number): string {
   return value.toLocaleString('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 })
@@ -100,7 +56,7 @@ const statsDelMes = computed(() => [
     icon: 'pi-chart-line',
     tone: 'brand',
     hint: 'Ventas netas del MES CALENDARIO en curso (facturas menos notas de crédito, por fecha de emisión). Exportaciones convertidas a pesos.',
-    note: `${documentosDelMes.value.length} este mes`,
+    note: `${documentosDelMes.value} este mes`,
     to: '/documents',
     linkLabel: 'Ver documentos'
   },
@@ -126,8 +82,8 @@ const statsAcumulado = computed(() => [
     hint: 'TODO lo impago histórico (sin límite de período), neto de notas de crédito y abonos — por eso puede superar a las ventas del mes. El detalle documento por documento está en Finanzas.',
     note:
       exposicionCobrar.value.length > 0
-        ? `${cobrar.value.length} documentos · incluye ${exposicionCobrar.value.map((e) => formatMonto(e.monto, e.moneda)).join(' + ')}`
-        : `${cobrar.value.length} documentos`,
+        ? `${resumen.value?.porCobrar.documentos ?? 0} documentos · incluye ${exposicionCobrar.value.map((e: ResumenCuentas['porCobrar']['exposicion'][number]) => formatMonto(e.monto, e.moneda)).join(' + ')}`
+        : `${resumen.value?.porCobrar.documentos ?? 0} documentos`,
     to: '/finanzas',
     linkLabel: 'Ver en Finanzas'
   },
@@ -141,7 +97,7 @@ const statsAcumulado = computed(() => [
     // compra emitidas es lo que hacía imposible cuadrar el número contra la
     // página de Compras.
     hint: 'TODO lo impago a proveedores (sin límite de período): las compras registradas MÁS las facturas de compra que emitiste tú (esas viven en Documentos, no en Compras). El detalle documento por documento está en Finanzas.',
-    note: `${pagar.value.length} documentos`,
+    note: `${resumen.value?.porPagar.documentos ?? 0} documentos`,
     to: '/finanzas',
     linkLabel: 'Ver en Finanzas'
   }
@@ -242,21 +198,22 @@ onMounted(async () => {
     // todo el Promise.all (incluyendo documents/suppliers) por una sola
     // llamada rechazada. Se omiten directamente: esas secciones simplemente
     // no aplican a ese rol.
-    const [documentsResult, purchasesResult, suppliersResult, customersResult, incomingResult] = await Promise.all([
-      fetchColeccionCompleta<DteDocument>('documents', ['tipoDte', 'folio', 'ambiente', 'estado', 'montos', 'montoPagado', 'fechaEmision', 'createdAt', 'referencias', 'exportacion', 'retencionIvaCompra', 'customerId', 'supplierId', 'guiaFacturada', 'trackId']),
+    const [resumenResult, documentsResult, purchasesResult, suppliersResult, incomingResult] = await Promise.all([
+      // Un objeto con los totales ya sumados, en vez de miles de documentos
+      // para sumarlos acá.
+      feathersClient.service('resumen-cuentas').find() as Promise<ResumenCuentas>,
+      // Los recientes para la tabla del final: 5 filas, no la colección.
+      fetchColeccionCompleta<DteDocument>('documents', ['tipoDte', 'folio', 'estado', 'montos', 'fechaEmision', 'createdAt', 'customerId', 'supplierId', 'trackId']),
       auth.hasMinRole('contador') ? fetchColeccionCompleta<Purchase>('purchases') : Promise.resolve([]),
       fetchColeccionCompleta<Supplier>('suppliers'),
-      // Solo lo que las cuentas por cobrar necesitan de cada cliente: el
-      // nombre para mostrar y su plazo de pago para el vencimiento.
-      fetchColeccionCompleta<Customer>('customers', ['razonSocial', 'plazoPagoDias']),
       auth.hasMinRole('contador')
         ? fetchColeccionCompleta<IncomingInvoice>('incoming-invoices')
         : Promise.resolve([])
     ])
+    resumen.value = resumenResult
     documents.value = documentsResult
     purchases.value = purchasesResult
     suppliers.value = suppliersResult
-    customers.value = customersResult
     incomingInvoices.value = incomingResult
   } finally {
     loading.value = false

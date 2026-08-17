@@ -24,7 +24,7 @@ import AyudaPagina from '@/components/AyudaPagina.vue'
 import { AYUDA_DOCUMENTOS } from './ayuda-documentos.js'
 import type { Customer, DteDocument, DteExportacion, DteItem, DtePago, Product, Supplier, ValorUf } from '@/types'
 import { TIPOS_DTE_EMITIBLES, nombreCortoTipoDte, tipoDteCorto, tipoDteLabel } from '@/tiposDte'
-import { esMonedaExtranjera, formatMonto, monedaDe, totalClp } from '@/cuentas'
+import { esMonedaExtranjera, formatMonto, monedaDe } from '@/cuentas'
 
 import {
   CLAUSULAS_VENTA,
@@ -221,7 +221,7 @@ function receptorOf(document: DteDocument): Customer | Supplier | undefined {
 // lectura del servidor; en la práctica siempre viene calculado.
 // En PESOS: la cifra sumable, la que muestran Panorama y Finanzas.
 function saldoOf(document: DteDocument): number {
-  return document.saldo ?? Math.max(0, totalClp(document) - document.montoPagado)
+  return document.saldo ?? Math.max(0, document.montos.total - document.montoPagado)
 }
 
 // En la MONEDA del documento: la que se muestra junto a él, donde poner pesos

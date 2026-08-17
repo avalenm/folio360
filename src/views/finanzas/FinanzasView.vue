@@ -2,158 +2,53 @@
 import AyudaPagina from '@/components/AyudaPagina.vue'
 import { computed, onMounted, ref } from 'vue'
 import { feathersClient } from '@/services/feathers'
-import { useAuthStore } from '@/stores/auth'
-import type { Customer, DteDocument, Paginated, Purchase, Supplier } from '@/types'
 import type { SeccionAyuda } from '@/components/AyudaPagina.vue'
-import {
-  GLOSA_CREDITO_SIN_APLICAR,
-  agingDe,
-  cuentasPorCobrar,
-  documentosVigentes,
-  esNotaDeCompra,
-  exposicionExtranjera,
-  formatMonto,
-  ivaClp,
-  lineasPorPagar,
-  rankingDe,
-  signoVenta,
-  totalClp
-} from '@/cuentas'
+import { GLOSA_CREDITO_SIN_APLICAR, formatMonto, type ResumenCuentas } from '@/cuentas'
 
 // Tablero financiero: evolución mensual, cuentas por cobrar y por pagar con
 // antigüedad POR VENCIMIENTO (no por emisión: una factura a 30 días emitida
 // ayer no está atrasada), el desglose documento por documento de lo que se
-// debe, y el IVA estimado del mes (débito − crédito).
+// debe, y el IVA estimado del mes.
 //
-// Las reglas de qué documento suma y cuál resta viven en cuentas.ts, no acá:
-// esta pantalla y el Panorama las tenían duplicadas y se descuadraban entre
-// sí. Lo propio de esta vista es la evolución mensual y el IVA.
+// Los números NO se calculan acá: llegan sumados del servicio
+// `resumen-cuentas` (ver server/src/services/cuentas/calculo.ts). Esta
+// pantalla y el Panorama tenían las reglas duplicadas y se descuadraban entre
+// sí; ahora las dos muestran lo mismo porque piden lo mismo.
 
-const auth = useAuthStore()
 const loading = ref(true)
-const documents = ref<DteDocument[]>([])
-const purchases = ref<Purchase[]>([])
-const customers = ref<Customer[]>([])
-const suppliers = ref<Supplier[]>([])
+const resumen = ref<ResumenCuentas | null>(null)
 
-async function fetchTodo<T>(service: string, select?: string[]): Promise<T[]> {
-  // Solo los campos que los cálculos usan: sin $select cada documento viaja
-  // con su XML firmado completo y sus ítems (~10-30 KB c/u) — varios MB para
-  // sumar cuatro números, que era lo que hacía lenta la página. La primera
-  // página revela el total y el resto se pide EN PARALELO.
-  const query = (skip: number): Record<string, unknown> => ({
-    $limit: 100,
-    $skip: skip,
-    $sort: { createdAt: -1 },
-    ...(select ? { $select: select } : {})
-  })
+// Con valores por defecto en vez de `undefined`: la plantilla los usa antes
+// de que llegue la respuesta, y un cero se muestra bien mientras carga.
+const AGING_CERO = { total: 0, porVencer: 0, v1a30: 0, v31a60: 0, v61a90: 0, vMas90: 0 }
+const CUENTA_VACIA = { total: 0, documentos: 0, aging: AGING_CERO, ranking: [], lineas: [] }
 
-  const primera = (await feathersClient.service(service).find({ query: query(0) })) as Paginated<T> | T[]
-  if (Array.isArray(primera)) return primera
+const porCobrar = computed(() => resumen.value?.porCobrar ?? { ...CUENTA_VACIA, exposicion: [], creditosSinAplicar: [] })
+const porPagar = computed(() => resumen.value?.porPagar ?? CUENTA_VACIA)
+const exposicionCobrar = computed(() => resumen.value?.porCobrar.exposicion ?? [])
+const creditosSinAplicar = computed(() => resumen.value?.porCobrar.creditosSinAplicar ?? [])
+const desglosePagar = computed(() => resumen.value?.porPagar.lineas ?? [])
+const ivaMes = computed(() => ({
+  debito: resumen.value?.mes.ivaDebito ?? 0,
+  credito: resumen.value?.mes.ivaCredito ?? 0,
+  neto: resumen.value?.mes.ivaNeto ?? 0
+}))
+const posicionNeta = computed(() => resumen.value?.posicionNeta ?? 0)
 
-  const items = [...primera.data]
-  const pendientes: Promise<Paginated<T> | T[]>[] = []
-  for (let skip = 100; skip < primera.total; skip += 100) {
-    pendientes.push(feathersClient.service(service).find({ query: query(skip) }) as Promise<Paginated<T> | T[]>)
-  }
-  for (const res of await Promise.all(pendientes)) {
-    items.push(...(Array.isArray(res) ? res : res.data))
-  }
-  return items
-}
-
-const docsEmitidos = computed(() => documentosVigentes(documents.value, auth.currentOrganization?.ambiente))
-
-// ---- Evolución mensual (últimos 12 meses) ----
-function claveMes(fecha: string | Date): string {
-  const d = new Date(fecha)
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-}
-
-const meses = computed(() => {
-  const lista: string[] = []
-  const hoy = new Date()
-  for (let i = 11; i >= 0; i--) {
-    const d = new Date(hoy.getFullYear(), hoy.getMonth() - i, 1)
-    lista.push(claveMes(d))
-  }
-  return lista
-})
-
+// La evolución llega con los montos; el alto de cada barra es presentación,
+// así que se calcula acá.
 const evolucion = computed(() => {
-  const ventas = new Map<string, number>()
-  const compras = new Map<string, number>()
-
-  for (const doc of docsEmitidos.value) {
-    const signo = esNotaDeCompra(doc) ? 0 : signoVenta(doc.tipoDte)
-    const mes = claveMes(doc.fechaEmision ?? doc.createdAt)
-    if (signo !== 0) ventas.set(mes, (ventas.get(mes) ?? 0) + signo * totalClp(doc))
-    if (doc.tipoDte === 46) compras.set(mes, (compras.get(mes) ?? 0) + doc.montos.total)
-    // Las NC/ND que corrigen facturas de compra ajustan las compras del mes.
-    if (esNotaDeCompra(doc)) {
-      const signoNota = doc.tipoDte === 61 || doc.tipoDte === 112 ? -1 : 1
-      compras.set(mes, (compras.get(mes) ?? 0) + signoNota * doc.montos.total)
-    }
-  }
-  for (const compra of purchases.value) {
-    if (compra.tipoDocumento === 'factura_compra') continue // ya contada como DTE 46
-    const mes = claveMes(compra.fecha)
-    const signo = compra.tipoDocumento === 'nota_credito' ? -1 : 1
-    compras.set(mes, (compras.get(mes) ?? 0) + signo * compra.montoTotal)
-  }
-
-  const maximo = Math.max(1, ...meses.value.map((m) => Math.max(ventas.get(m) ?? 0, compras.get(m) ?? 0)))
-  return meses.value.map((mes) => {
-    const v = ventas.get(mes) ?? 0
-    const c = compras.get(mes) ?? 0
-    return { mes, ventas: v, compras: c, margen: v - c, altoVentas: Math.max(0, (v / maximo) * 100), altoCompras: Math.max(0, (c / maximo) * 100) }
-  })
+  const meses = resumen.value?.evolucion ?? []
+  const maximo = Math.max(1, ...meses.map((m) => Math.max(m.ventas, m.compras)))
+  return meses.map((m) => ({
+    ...m,
+    altoVentas: Math.max(0, (m.ventas / maximo) * 100),
+    altoCompras: Math.max(0, (m.compras / maximo) * 100)
+  }))
 })
-
-// ---- Cuentas por cobrar y por pagar (aging por vencimiento) ----
-// Las líneas son la unidad: el aging, el ranking por contraparte y el
-// desglose de abajo salen todos de la MISMA lista que suma el total, así que
-// no pueden contradecirse entre sí ni contra el Panorama (ver cuentas.ts).
-const cobranza = computed(() => cuentasPorCobrar(docsEmitidos.value, customers.value))
-const lineasCobrar = computed(() => cobranza.value.lineas)
-const lineasPagar = computed(() => lineasPorPagar(docsEmitidos.value, purchases.value, suppliers.value))
-
-const porCobrar = computed(() => ({ aging: agingDe(lineasCobrar.value), ranking: rankingDe(lineasCobrar.value) }))
-const porPagar = computed(() => ({ aging: agingDe(lineasPagar.value), ranking: rankingDe(lineasPagar.value) }))
-
-// Cuánto del por cobrar está en moneda extranjera. El total sigue en pesos
-// —es lo único sumable y lo que calza con el SII— pero esos pesos quedaron
-// congelados al cambio del día de emisión: si el dólar se mueve, lo que se va
-// a cobrar es otro. Esto dice qué parte del total depende de eso.
-const exposicionCobrar = computed(() => exposicionExtranjera(lineasCobrar.value))
-
-// El desglose se ordena por monto: lo que más pesa en el total es lo primero
-// que uno quiere ver cuando el número no calza con lo que esperaba.
-const desglosePagar = computed(() => [...lineasPagar.value].sort((a, b) => b.monto - a.monto))
 
 // El mes en curso es la última columna de la evolución.
 const mesActual = computed(() => evolucion.value[evolucion.value.length - 1])
-
-const posicionNeta = computed(() => porCobrar.value.aging.total - porPagar.value.aging.total)
-
-// ---- IVA estimado del mes (débito − crédito) ----
-const ivaMes = computed(() => {
-  const mesActual = claveMes(new Date())
-  let debito = 0
-  let credito = 0
-  for (const doc of docsEmitidos.value) {
-    if (claveMes(doc.fechaEmision ?? doc.createdAt) !== mesActual) continue
-    const signo = signoVenta(doc.tipoDte)
-    if (signo !== 0) debito += signo * ivaClp(doc)
-    if (doc.tipoDte === 46) credito += doc.montos.iva
-  }
-  for (const compra of purchases.value) {
-    if (compra.tipoDocumento === 'factura_compra' || claveMes(compra.fecha) !== mesActual) continue
-    const signo = compra.tipoDocumento === 'nota_credito' ? -1 : 1
-    credito += signo * compra.montoIva
-  }
-  return { debito, credito, neto: debito - credito }
-})
 
 function fm(valor: number): string {
   return valor.toLocaleString('es-CL')
@@ -187,16 +82,7 @@ const AYUDA_FINANZAS: SeccionAyuda[] = [
 
 onMounted(async () => {
   try {
-    const [docs, compras, clientes, proveedores] = await Promise.all([
-      fetchTodo<DteDocument>('documents', ['tipoDte', 'folio', 'ambiente', 'estado', 'montos', 'montoPagado', 'fechaEmision', 'createdAt', 'referencias', 'exportacion', 'retencionIvaCompra', 'customerId', 'supplierId', 'guiaFacturada', 'trackId']),
-      auth.hasMinRole('contador') ? fetchTodo<Purchase>('purchases') : Promise.resolve([]),
-      fetchTodo<Customer>('customers', ['razonSocial', 'plazoPagoDias']),
-      fetchTodo<Supplier>('suppliers', ['razonSocial'])
-    ])
-    documents.value = docs
-    purchases.value = compras
-    customers.value = clientes
-    suppliers.value = proveedores
+    resumen.value = (await feathersClient.service('resumen-cuentas').find()) as ResumenCuentas
   } finally {
     loading.value = false
   }
@@ -309,7 +195,7 @@ onMounted(async () => {
                factura. No entran al total a propósito (rebajarían la cobranza
                para siempre), pero tampoco pueden desaparecer sin decir nada:
                son plata a favor del cliente que no está reflejada. -->
-          <template v-if="cobranza.creditosSinAplicar.length > 0">
+          <template v-if="creditosSinAplicar.length > 0">
             <h3>Notas de crédito sin aplicar</h3>
             <p class="detalle">
               No se descuentan del total de arriba porque no se pudieron asociar a un saldo por cobrar. Vale la pena
@@ -317,7 +203,7 @@ onMounted(async () => {
             </p>
             <table class="tabla-ranking">
               <tbody>
-                <tr v-for="credito in cobranza.creditosSinAplicar" :key="credito.id">
+                <tr v-for="credito in creditosSinAplicar" :key="credito.id">
                   <td>{{ credito.descripcion }}</td>
                   <td>{{ credito.contraparte }}</td>
                   <td class="num">${{ fm(credito.monto) }}</td>
