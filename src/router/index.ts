@@ -109,4 +109,34 @@ router.beforeEach((to) => {
   return true
 })
 
+// Un chunk que ya no existe deja la pantalla EN BLANCO, y no es un bug del
+// código: pasa cuando se despliega una versión nueva mientras el navegador
+// todavía tiene en caché el index.html anterior (GitHub Pages lo sirve con
+// max-age=600). Ese HTML viejo pide archivos con los hashes viejos, que el
+// despliegue ya borró, el import dinámico falla y no se monta nada.
+//
+// Se recarga UNA sola vez: al pedir el documento de nuevo el navegador
+// revalida, llega el index.html nuevo y los nombres de chunk vuelven a
+// existir. La marca en sessionStorage evita quedar en un bucle de recargas si
+// el fallo fuera por otra causa (sin red, por ejemplo).
+const MARCA_RECARGA = 'folio360:recargado-por-chunk'
+
+const ES_CHUNK_PERDIDO =
+  /failed to fetch dynamically imported module|error loading dynamically imported module|importing a module script failed/i
+
+router.onError((error: Error, to) => {
+  if (!ES_CHUNK_PERDIDO.test(error.message)) return
+  if (sessionStorage.getItem(MARCA_RECARGA)) return
+
+  sessionStorage.setItem(MARCA_RECARGA, '1')
+  // El hash se fija antes de recargar para no perder la ruta a la que se
+  // estaba yendo.
+  window.location.hash = to.fullPath
+  window.location.reload()
+})
+
+// Una navegación que sí completó significa que la versión cargada está sana:
+// se limpia la marca para que la próxima vez se pueda volver a recargar.
+router.afterEach(() => sessionStorage.removeItem(MARCA_RECARGA))
+
 export default router
