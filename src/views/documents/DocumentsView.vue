@@ -255,6 +255,9 @@ const filterFolio = ref('')
 const filterTipo = ref<number | null>(null)
 const filterCliente = ref('')
 const filterEstado = ref<string | null>(null)
+const filterAmbiente = ref<string | null>(null)
+// Mientras la organización certifica no hay nada que separar.
+const esCertificacion = computed(() => auth.currentOrganization?.ambiente === 'certificacion')
 const filterFechas = ref<Date[] | null>(null)
 
 const filtrosDocumentos = computed(() => ({
@@ -262,6 +265,7 @@ const filtrosDocumentos = computed(() => ({
   receptor: filterCliente.value.trim(),
   tipoDte: filterTipo.value,
   estado: filterEstado.value,
+  ambiente: filterAmbiente.value,
   desde: filterFechas.value?.[0]?.toISOString(),
   hasta: filterFechas.value?.[1]?.toISOString()
 }))
@@ -271,6 +275,7 @@ function limpiarFiltros(): void {
   filterTipo.value = null
   filterCliente.value = ''
   filterEstado.value = null
+  filterAmbiente.value = null
   filterFechas.value = null
 }
 
@@ -495,7 +500,6 @@ function blankExportacion() {
 
 const draft = reactive({
   tipoDte: 33,
-  ambiente: 'certificacion' as 'certificacion' | 'produccion',
   customerId: '',
   supplierId: '',
   giroReceptor: '',
@@ -648,7 +652,6 @@ const montosPreview = computed(() => {
 function openCreate(): void {
   editingId.value = null
   draft.tipoDte = 33
-  draft.ambiente = 'certificacion'
   draft.customerId = ''
   draft.supplierId = ''
   draft.giroReceptor = ''
@@ -670,7 +673,6 @@ function openCreate(): void {
 function openEdit(document: DteDocument): void {
   editingId.value = document._id
   draft.tipoDte = document.tipoDte
-  draft.ambiente = document.ambiente
   draft.customerId = document.customerId ?? ''
   draft.supplierId = document.supplierId ?? ''
   draft.giroReceptor = document.giroReceptor ?? ''
@@ -833,7 +835,6 @@ async function handleSave(): Promise<void> {
 
       await create({
         tipoDte: draft.tipoDte,
-        ambiente: draft.ambiente,
         customerId: TIPOS_DTE_COMPRA.includes(draft.tipoDte) ? undefined : draft.customerId,
         supplierId: TIPOS_DTE_COMPRA.includes(draft.tipoDte) ? draft.supplierId : undefined,
         giroReceptor: draft.giroReceptor || undefined,
@@ -1452,6 +1453,19 @@ onMounted(async () => {
           show-clear
         />
       </label>
+      <!-- Aparece solo cuando hay algo que separar: mientras la organización
+           certifica, TODO es de certificación y el filtro sería ruido. -->
+      <label v-if="!esCertificacion" class="field">
+        <span>Ambiente</span>
+        <Select
+          v-model="filterAmbiente"
+          :options="ambientes"
+          option-label="label"
+          option-value="value"
+          placeholder="Todos"
+          show-clear
+        />
+      </label>
       <label class="field field-grow">
         <span>Fecha de emisión</span>
         <DatePicker v-model="filterFechas" selection-mode="range" date-format="dd/mm/yy" placeholder="Rango de fechas" show-icon icon-display="input" />
@@ -1549,6 +1563,16 @@ onMounted(async () => {
       <Column header="Estado">
         <template #body="{ data }">
           <Tag :severity="estadoSeverity[data.estado]" :value="estadoLabel(data.estado)" :title="data.envioSiiGlosa" />
+          <!-- Solo se marca lo de prueba: en producción, marcar cada fila como
+               "producción" sería ruido en todas. Lo que hay que poder
+               distinguir de un vistazo es lo que NO es real. -->
+          <Tag
+            v-if="data.ambiente === 'certificacion'"
+            severity="warn"
+            value="Prueba"
+            title="Documento de certificación: no tiene validez tributaria"
+            class="estado-extra"
+          />
           <!-- Una guía facturada sigue aceptada ante el SII, pero su monto ya
                lo declara la factura: conviene verlo en el listado, porque es
                lo que decide cómo entra al Libro de Guías. -->
@@ -1587,16 +1611,6 @@ onMounted(async () => {
               <Select
                 v-model="draft.tipoDte"
                 :options="TIPOS_DTE_EMITIBLES"
-                option-label="label"
-                option-value="value"
-                :disabled="!!editingId"
-              />
-            </label>
-            <label class="field">
-              <span>Ambiente</span>
-              <Select
-                v-model="draft.ambiente"
-                :options="ambientes"
                 option-label="label"
                 option-value="value"
                 :disabled="!!editingId"

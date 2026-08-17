@@ -7,6 +7,8 @@ import type { Role } from '@/types'
 const router = useRouter()
 const auth = useAuthStore()
 
+const esCertificacion = computed(() => auth.currentOrganization?.ambiente === 'certificacion')
+
 interface NavItem {
   to: string
   label: string
@@ -127,6 +129,16 @@ function handleSwitchOrganization(): void {
           </span>
           <i class="pi pi-chevron-down org-chevron" />
         </button>
+
+        <!-- Mientras la organización esté certificando, TODO lo que se ve es
+             de prueba: los documentos, los totales, los libros. Decirlo en
+             una sola pantalla no basta —el usuario navega— así que va acá,
+             donde acompaña a cualquier vista. Desaparece solo al pasar a
+             producción. -->
+        <div v-if="esCertificacion" class="ambiente-aviso" title="Los documentos que emitas van al servidor de pruebas del SII, no tienen validez tributaria">
+          <i class="pi pi-exclamation-triangle" />
+          <span>Ambiente de prueba — certificación</span>
+        </div>
 
         <div class="topbar-user">
           <span class="user-avatar">{{ userInitials }}</span>
@@ -282,6 +294,23 @@ function handleSwitchOrganization(): void {
   align-items: center;
   justify-content: space-between;
   padding: 0 1.5rem;
+  gap: 1rem;
+}
+
+/* Ámbar, no rojo: no es un error, es un estado en el que se está a propósito
+   — pero tiene que verse sin buscarlo. */
+.ambiente-aviso {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.35rem 0.8rem;
+  border-radius: 999px;
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fcd34d;
+  font-size: 0.78rem;
+  font-weight: 650;
+  white-space: nowrap;
 }
 
 .org-switch {
