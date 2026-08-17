@@ -288,15 +288,30 @@ onMounted(async () => {
         </p>
 
         <div class="iva-tarjetas">
-          <div class="iva-tarjeta grave">
+          <!-- El color de alarma solo cuando hay algo que alarmar: un cero
+               en naranja hace dudar de una cifra que en realidad es buena. -->
+          <div class="iva-tarjeta" :class="ivaFinanciado.enterado > 0 ? 'grave' : 'sano'">
             <span class="etiqueta">Ya enterado al SII y no cobrado</span>
             <span class="valor">${{ fm(ivaFinanciado.enterado) }}</span>
-            <span class="detalle">De meses ya declarados: esta plata salió de tu caja y no ha vuelto.</span>
+            <span v-if="ivaFinanciado.enterado > 0" class="detalle">
+              De meses ya declarados: esta plata salió de tu caja y no ha vuelto.
+            </span>
+            <span v-else class="detalle">
+              Todo lo que emitiste con IVA en meses anteriores ya está cobrado.
+            </span>
           </div>
           <div class="iva-tarjeta">
-            <span class="etiqueta">Por enterar del mes en curso</span>
+            <span class="etiqueta">Débito de facturas del mes aún no cobradas</span>
             <span class="valor">${{ fm(ivaFinanciado.porEnterar) }}</span>
-            <span class="detalle">Todavía no se lo pagas al SII. No es pérdida: es lo que tienes que tener el mes que viene.</span>
+            <!-- OJO: esto NO es lo que se va a pagar. El F29 se paga por el
+                 NETO del mes, que el crédito de las compras rebaja. Decir
+                 "es lo que tienes que tener el mes que viene" contradecía
+                 la tarjeta de IVA estimado de más arriba, en la misma
+                 pantalla. -->
+            <span class="detalle">
+              Es el IVA de esas facturas, que todavía no le pagas al SII. Lo que efectivamente pagarás es el
+              <strong>neto del mes</strong> (${{ fm(ivaMes.neto) }}), porque el crédito de tus compras lo rebaja.
+            </span>
           </div>
         </div>
 
@@ -433,6 +448,8 @@ onMounted(async () => {
 .iva-tarjetas { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; margin: 1rem 0; }
 .iva-tarjeta { display: flex; flex-direction: column; gap: 0.25rem; padding: 1rem 1.1rem; border-radius: 10px; background: #f8fafc; border: 1px solid #e2e8f0; }
 .iva-tarjeta.grave { background: #fff7ed; border-color: #fdba74; }
+.iva-tarjeta.sano { background: #f0fdf4; border-color: #86efac; }
+.iva-tarjeta.sano .valor { color: #15803d; }
 .iva-tarjeta .valor { font-size: 1.45rem; font-weight: 750; }
 .iva-tarjeta.grave .valor { color: #c2410c; }
 .iva-revisar { display: flex; flex-direction: column; gap: 0.35rem; margin-top: 1rem; padding: 0.85rem 1rem; border-radius: 8px; background: #fef2f2; border-left: 3px solid #ef4444; font-size: 0.83rem; color: #7f1d1d; }
