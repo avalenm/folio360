@@ -15,6 +15,8 @@ import type { MenuItem } from 'primevue/menuitem'
 import { useConfirm } from 'primevue/useconfirm'
 import { useToast } from 'primevue/usetoast'
 import { useResource } from '@/composables/useResource'
+import { useListaPaginada } from '@/composables/useListaPaginada'
+import { useCatalogoReferencias } from '@/composables/useCatalogoReferencias'
 import { useAuthStore } from '@/stores/auth'
 import { feathersClient } from '@/services/feathers'
 import FacturaPreview from './FacturaPreview.vue'
@@ -30,6 +32,7 @@ import {
   INDICADORES_SERVICIO_EXPORTACION,
   MODALIDADES_VENTA,
   MONEDAS_EXPORTACION,
+  codigoIsoMoneda,
   PAISES,
   PUERTOS,
   TIPOS_BULTO,
@@ -37,7 +40,37 @@ import {
   VIAS_TRANSPORTE
 } from '@/codigosAduana'
 
-const { items: documents, loading, fetchAll, create, update, remove } = useResource<DteDocument>('documents')
+// La lista la pagina el SERVIDOR y los filtros viajan con la consulta: antes
+// se cargaban los 100 más recientes y se filtraba sobre esos, así que buscar
+// un folio anterior a ese corte respondía que no existía.
+const {
+  items: documents,
+  total: totalDocumentos,
+  desde: desdeDocumentos,
+  porPagina,
+  loading,
+  cargar: fetchAll,
+  irA,
+  create,
+  update,
+  remove
+} = useListaPaginada<DteDocument>('documents', { filtros: () => filtrosDocumentos.value })
+
+// Los referenciables NO salen de la página: una nota de crédito sobre una
+// factura de hace tres meses es el caso normal. Proyectado a lo que las
+// etiquetas necesitan, se puede traer completo.
+const { items: documentosReferenciables, cargar: cargarReferenciables, invalidar: invalidarReferenciables } =
+  useCatalogoReferencias<DteDocument>('documents', [
+    'tipoDte',
+    'folio',
+    'estado',
+    'customerId',
+    'supplierId',
+    'montos',
+    'items',
+    'ambiente',
+    'createdAt'
+  ])
 const { items: customers, fetchAll: fetchCustomers } = useResource<Customer>('customers')
 const { items: suppliers, fetchAll: fetchSuppliers } = useResource<Supplier>('suppliers')
 const { items: products, fetchAll: fetchProducts } = useResource<Product>('products')
@@ -151,6 +184,13 @@ const INDICADORES_TRASLADO = [
 ]
 
 const customerOptions = computed(() => customers.value.map((c) => ({ label: c.razonSocial, value: c._id })))
+// El selector muestra "USD — DOLAR USA": el código ISO para reconocerla de
+// una, y el nombre del SII porque es el que queda en el documento.
+const opcionesMoneda = MONEDAS_EXPORTACION.map((moneda) => {
+  const iso = codigoIsoMoneda(moneda)
+  return { label: iso === moneda ? moneda : `${iso} — ${moneda}`, value: moneda }
+})
+
 const supplierOptions = computed(() => suppliers.value.map((s) => ({ label: s.razonSocial, value: s._id })))
 const productOptions = computed(() => products.value.map((p) => ({ label: `${p.nombre} (${p.sku})`, value: p._id })))
 
@@ -217,38 +257,14 @@ const filterCliente = ref('')
 const filterEstado = ref<string | null>(null)
 const filterFechas = ref<Date[] | null>(null)
 
-const filteredDocuments = computed(() =>
-  documents.value.filter((document) => {
-    if (filterFolio.value && !String(document.folio ?? '').includes(filterFolio.value.trim())) {
-      return false
-    }
-
-    if (filterTipo.value !== null && document.tipoDte !== filterTipo.value) {
-      return false
-    }
-
-    if (filterEstado.value !== null && document.estado !== filterEstado.value) {
-      return false
-    }
-
-    if (filterCliente.value) {
-      const receptor = receptorOf(document)
-      const needle = filterCliente.value.trim().toLowerCase()
-      const matches =
-        receptor && (receptor.razonSocial.toLowerCase().includes(needle) || receptor.rut.toLowerCase().includes(needle))
-      if (!matches) return false
-    }
-
-    const [from, to] = filterFechas.value ?? []
-    if (from) {
-      const docDate = new Date(document.fechaEmision ?? document.createdAt)
-      if (docDate < from) return false
-      if (to && docDate > new Date(to.getTime() + 86399999)) return false
-    }
-
-    return true
-  })
-)
+const filtrosDocumentos = computed(() => ({
+  folio: filterFolio.value.trim(),
+  receptor: filterCliente.value.trim(),
+  tipoDte: filterTipo.value,
+  estado: filterEstado.value,
+  desde: filterFechas.value?.[0]?.toISOString(),
+  hasta: filterFechas.value?.[1]?.toISOString()
+}))
 
 function limpiarFiltros(): void {
   filterFolio.value = ''
@@ -555,7 +571,7 @@ watch(
 // DTE (ver documents.service.ts). Solo se ofrecen documentos ya emitidos (con
 // folio): un borrador no es un DTE válido para referenciar todavía.
 const referenceableDocuments = computed(() =>
-  documents.value
+  documentosReferenciables.value
     .filter((d) => d.customerId === draft.customerId && d.folio != null && d._id !== editingId.value)
     .map((d) => ({
       label: `${tipoDteLabel(d.tipoDte)} · folio ${d.folio} · $${d.montos.total.toLocaleString('es-CL')}`,
@@ -563,7 +579,7 @@ const referenceableDocuments = computed(() =>
     }))
 )
 
-const referenciaDoc = computed(() => documents.value.find((d) => d._id === draft.referenciaDocId))
+const referenciaDoc = computed(() => documentosReferenciables.value.find((d) => d._id === draft.referenciaDocId))
 
 function copiarItemsReferencia(): void {
   const doc = referenciaDoc.value
@@ -648,6 +664,7 @@ function openCreate(): void {
   draft.dscRcgGlobales = []
   draft.referenciasAduana = []
   dialogVisible.value = true
+  void cargarReferenciables()
 }
 
 function openEdit(document: DteDocument): void {
@@ -661,7 +678,7 @@ function openEdit(document: DteDocument): void {
   draft.referenciaCodRef = referencia?.codRef ?? 1
   draft.referenciaRazon = referencia?.razon ?? ''
   draft.referenciaDocId = referencia
-    ? (documents.value.find((d) => d.tipoDte === referencia.tipoDteRef && d.folio === referencia.folioRef)?._id ?? '')
+    ? (documentosReferenciables.value.find((d) => d.tipoDte === referencia.tipoDteRef && d.folio === referencia.folioRef)?._id ?? '')
     : ''
   draft.indTraslado = document.indTraslado ?? 1
   draft.tpoDespacho = document.tpoDespacho ?? null
@@ -686,6 +703,7 @@ function openEdit(document: DteDocument): void {
       razon: referencia.razon
     }))
   dialogVisible.value = true
+  void cargarReferenciables()
 }
 
 function addItem(): void {
@@ -993,7 +1011,7 @@ const anularMotivo = ref('')
 // guías. El <TpoDocRef> del Libro de Guías no admite el código 52 — una guía
 // no se reemplaza con otra guía, sino con una factura o una nota.
 const documentosQuePuedenFacturar = computed(() =>
-  documents.value
+  documentosReferenciables.value
     .filter(
       (d) =>
         d.tipoDte !== TIPO_DTE_GUIA_DESPACHO &&
@@ -1010,11 +1028,12 @@ function openFacturada(document: DteDocument): void {
   guiaDocument.value = document
   facturadaDocId.value = ''
   facturadaVisible.value = true
+  void cargarReferenciables()
 }
 
 async function confirmFacturada(): Promise<void> {
   const guia = guiaDocument.value
-  const factura = documents.value.find((d) => d._id === facturadaDocId.value)
+  const factura = documentosReferenciables.value.find((d) => d._id === facturadaDocId.value)
   if (!guia || !factura) return
 
   guiaSending.value = true
@@ -1098,7 +1117,8 @@ function confirmEmit(): void {
       emitting.value = true
       try {
         await feathersClient.service('emit-document').create({ documentId: document._id })
-        await fetchAll()
+        invalidarReferenciables()
+    await fetchAll()
         previewVisible.value = false
         toast.add({ severity: 'success', summary: 'Documento emitido y firmado', life: 3000 })
       } catch (e) {
@@ -1174,6 +1194,7 @@ function confirmSendSet(): void {
           .service('send-document-set')
           .create({ documentIds: documents.map((d) => d._id) })
         selectedDocuments.value = []
+        invalidarReferenciables()
         await fetchAll()
         toast.add({
           severity: 'success',
@@ -1207,6 +1228,7 @@ function confirmSend(document: DteDocument): void {
       sending.value = true
       try {
         await feathersClient.service('send-document').create({ documentId: document._id })
+        invalidarReferenciables()
         await fetchAll()
         toast.add({ severity: 'success', summary: 'Documento enviado al SII', life: 3000 })
       } catch (e) {
@@ -1452,10 +1474,18 @@ onMounted(async () => {
 
     <DataTable
       v-model:selection="selectedDocuments"
-      :value="filteredDocuments"
+      :value="documents"
       :loading="loading"
       data-key="_id"
       striped-rows
+      lazy
+      paginator
+      :rows="porPagina"
+      :total-records="totalDocumentos"
+      :first="desdeDocumentos"
+      current-page-report-template="{first}–{last} de {totalRecords}"
+      paginator-template="FirstPageLink PrevPageLink CurrentPageReport NextPageLink LastPageLink"
+      @page="irA($event.first)"
     >
       <Column selection-mode="multiple" style="width: 3rem" />
 
@@ -1651,7 +1681,16 @@ onMounted(async () => {
           <div class="form-row">
             <label class="field">
               <span>Moneda de la operación</span>
-              <Select v-model="draft.exportacion.moneda" :options="MONEDAS_EXPORTACION" filter :disabled="!!editingId" />
+              <!-- Se elige por código ISO pero se GUARDA el nombre del SII: es
+                   el literal que exige el <TpoMoneda> del DTE. -->
+              <Select
+                v-model="draft.exportacion.moneda"
+                :options="opcionesMoneda"
+                option-label="label"
+                option-value="value"
+                filter
+                :disabled="!!editingId"
+              />
             </label>
             <label class="field">
               <span>Tipo de cambio (pesos por unidad)</span>
@@ -2157,13 +2196,13 @@ onMounted(async () => {
           <div v-if="!esExportacion" class="totals-row"><span>Neto</span><span>${{ montosPreview.neto.toLocaleString('es-CL') }}</span></div>
           <div v-if="montosPreview.exento > 0" class="totals-row">
             <span>Exento</span>
-            <span v-if="esExportacion">{{ montosPreview.exento.toLocaleString('es-CL', { minimumFractionDigits: 2 }) }} {{ draft.exportacion.moneda }}</span>
+            <span v-if="esExportacion">{{ formatMonto(montosPreview.exento, draft.exportacion.moneda) }}</span>
             <span v-else>${{ montosPreview.exento.toLocaleString('es-CL') }}</span>
           </div>
           <div v-if="!esExportacion" class="totals-row"><span>IVA (19%)</span><span>${{ montosPreview.iva.toLocaleString('es-CL') }}</span></div>
           <div class="totals-row totals-total">
             <span>Total</span>
-            <span v-if="esExportacion">{{ montosPreview.total.toLocaleString('es-CL', { minimumFractionDigits: 2 }) }} {{ draft.exportacion.moneda }}</span>
+            <span v-if="esExportacion">{{ formatMonto(montosPreview.total, draft.exportacion.moneda) }}</span>
             <span v-else>${{ montosPreview.total.toLocaleString('es-CL') }}</span>
           </div>
         </div>

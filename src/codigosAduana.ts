@@ -59,6 +59,48 @@ export const MONEDAS_EXPORTACION: string[] = [
   "YEN"
 ]
 
+// Código ISO 4217 con que se MUESTRA cada moneda. El valor que se guarda y
+// que viaja en el <TpoMoneda> del DTE es SIEMPRE el nombre de la lista de
+// arriba —es la enumeración TipMonType del XSD y el SII rechaza cualquier
+// otra cosa—, así que esto no puede reemplazarlo: solo lo traduce al
+// mostrarlo, porque "USD 1.200" se lee de una y "1.200 DOLAR USA" no.
+//
+// Las que no aparecen acá se muestran con su nombre del SII tal cual: son
+// monedas históricas (ESCUDO, DRACMA, las anteriores al euro) o genéricas
+// (OTRAS MONEDAS, PESO) que no tienen un ISO que no induzca a error.
+const CODIGO_ISO_MONEDA: Record<string, string> = {
+  'BOLIVAR': 'VES',
+  'BOLIVIANO': 'BOB',
+  'CORONA DIN': 'DKK',
+  'CORONA NOR': 'NOK',
+  'CORONA SC': 'SEK',
+  'DIRHAM': 'AED',
+  'DOLAR AUST': 'AUD',
+  'DOLAR CAN': 'CAD',
+  'DOLAR HK': 'HKD',
+  'DOLAR NZ': 'NZD',
+  'DOLAR SIN': 'SGD',
+  'DOLAR TAI': 'TWD',
+  'DOLAR USA': 'USD',
+  'EURO': 'EUR',
+  'FRANCO SZ': 'CHF',
+  'GUARANI': 'PYG',
+  'LIBRA EST': 'GBP',
+  'NUEVO SOL': 'PEN',
+  'PESO CL': 'CLP',
+  'PESO COL': 'COP',
+  'PESO MEX': 'MXN',
+  'PESO URUG': 'UYU',
+  'RAND': 'ZAR',
+  'RENMINBI': 'CNY',
+  'RUPIA': 'INR',
+  'YEN': 'JPY'
+}
+
+export function codigoIsoMoneda(moneda: string): string {
+  return CODIGO_ISO_MONEDA[moneda] ?? moneda
+}
+
 // <FmaPagExp> — Anexo 51-22 (solo las formas simples; los códigos 50-79 son
 // combinaciones de pago anticipado con cobranza/crédito que no se ofrecen).
 export const FORMAS_PAGO_EXPORTACION: CodigoAduana[] = [

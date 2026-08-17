@@ -1,5 +1,6 @@
 import type { Ambiente, Customer, DteDocument, Purchase, PurchaseTipoDocumento, Supplier } from '@/types'
 import { nombreCortoTipoDte } from '@/tiposDte'
+import { codigoIsoMoneda } from '@/codigosAduana'
 
 // Fuente única de las cuentas por cobrar y por pagar.
 //
@@ -82,10 +83,14 @@ export function totalClp(doc: DteDocument): number {
 
 // Un monto con su moneda. Los pesos no llevan decimales (el SII los exige
 // enteros); la moneda extranjera sí, porque ahí el DTE los declara.
+//
+// Se muestra el código ISO ("USD 1.200,00"), no el nombre del SII ("1.200,00
+// DOLAR USA"): el nombre es lo que exige el XML, no lo que le sirve a quien
+// lee la pantalla.
 export function formatMonto(monto: number, moneda: string): string {
   return moneda === MONEDA_LOCAL
     ? `$${Math.round(monto).toLocaleString('es-CL')}`
-    : `${monto.toLocaleString('es-CL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${moneda}`
+    : `${codigoIsoMoneda(moneda)} ${monto.toLocaleString('es-CL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
 export function ivaClp(doc: DteDocument): number {

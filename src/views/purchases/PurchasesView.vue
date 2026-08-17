@@ -17,6 +17,8 @@ import type { MenuItem } from 'primevue/menuitem'
 import { useConfirm } from 'primevue/useconfirm'
 import { useToast } from 'primevue/usetoast'
 import { useResource } from '@/composables/useResource'
+import { useListaPaginada } from '@/composables/useListaPaginada'
+import { useCatalogoReferencias } from '@/composables/useCatalogoReferencias'
 import { NOMBRE_TIPO_COMPRA } from '@/cuentas'
 import { feathersClient } from '@/services/feathers'
 import type {
@@ -28,8 +30,35 @@ import type {
   Supplier
 } from '@/types'
 
-const { items: purchases, loading, fetchAll, create, update, remove } = useResource<Purchase>('purchases')
+// La lista la pagina el SERVIDOR y los filtros viajan con la consulta: antes
+// se cargaban 100 compras y se filtraba sobre esas, así que buscar un folio
+// más antiguo que ese corte no encontraba nada.
+const {
+  items: purchases,
+  total: totalCompras,
+  desde: desdeCompras,
+  porPagina,
+  loading,
+  cargar: fetchAll,
+  irA,
+  create,
+  update,
+  remove
+} = useListaPaginada<Purchase>('purchases', { filtros: () => filtrosCompras.value })
 const { items: suppliers, fetchAll: fetchSuppliers } = useResource<Supplier>('suppliers')
+
+// Los referenciables NO salen de la página cargada: una nota de crédito
+// puede corregir una compra de hace meses.
+const { items: comprasReferenciables, cargar: cargarReferenciables, invalidar: invalidarReferenciables } =
+  useCatalogoReferencias<Purchase>('purchases', [
+    'supplierId',
+    'tipoDocumento',
+    'folio',
+    'fecha',
+    'montoTotal',
+    'electronico',
+    'referencia'
+  ])
 const confirm = useConfirm()
 const toast = useToast()
 
@@ -78,34 +107,13 @@ const filterFechas = ref<Date[] | null>(null)
 
 const tipoFilterOptions = tiposDocumento
 
-const filteredPurchases = computed(() =>
-  purchases.value.filter((purchase) => {
-    if (filterFolio.value && !purchase.folio.includes(filterFolio.value.trim())) {
-      return false
-    }
-
-    if (filterProveedor.value) {
-      const supplier = supplierOf(purchase.supplierId)
-      const needle = filterProveedor.value.trim().toLowerCase()
-      const matches =
-        supplier && (supplier.razonSocial.toLowerCase().includes(needle) || supplier.rut.toLowerCase().includes(needle))
-      if (!matches) return false
-    }
-
-    if (filterTipo.value && purchase.tipoDocumento !== filterTipo.value) {
-      return false
-    }
-
-    const [from, to] = filterFechas.value ?? []
-    if (from) {
-      const purchaseDate = new Date(purchase.fecha)
-      if (purchaseDate < from) return false
-      if (to && purchaseDate > new Date(to.getTime() + 86399999)) return false
-    }
-
-    return true
-  })
-)
+const filtrosCompras = computed(() => ({
+  folio: filterFolio.value.trim(),
+  proveedor: filterProveedor.value.trim(),
+  tipoDocumento: filterTipo.value,
+  desde: filterFechas.value?.[0]?.toISOString(),
+  hasta: filterFechas.value?.[1]?.toISOString()
+}))
 
 function limpiarFiltros(): void {
   filterFolio.value = ''
@@ -257,7 +265,7 @@ watch(
 // deja bien el código SII del documento referido, que depende de si era
 // electrónico.
 const referenciaOptions = computed(() =>
-  purchases.value
+  comprasReferenciables.value
     .filter(
       (p) =>
         p.supplierId === draft.supplierId &&
@@ -283,6 +291,9 @@ function openCreate(): void {
   editingId.value = null
   Object.assign(draft, emptyDraft())
   dialogVisible.value = true
+  // El catálogo de referenciables se pide al abrir el diálogo, no al entrar a
+  // la pantalla: la mayoría de las visitas solo mira la lista.
+  void cargarReferenciables()
 }
 
 // El tratamiento no se guarda como tal: se deduce de cuál de los campos de
@@ -314,7 +325,7 @@ function openEdit(purchase: Purchase): void {
     tratamientoIva: tratamientoDe(purchase),
     motivoSinCredito: purchase.ivaNoRecuperable?.codigo ?? 4,
     referenciaId:
-      purchases.value.find(
+      comprasReferenciables.value.find(
         (p) =>
           p.supplierId === purchase.supplierId &&
           p.folio === purchase.referencia?.folio &&
@@ -322,6 +333,7 @@ function openEdit(purchase: Purchase): void {
       )?._id ?? null
   })
   dialogVisible.value = true
+  void cargarReferenciables()
 }
 
 async function handleSave(): Promise<void> {
@@ -333,7 +345,7 @@ async function handleSave(): Promise<void> {
     // valor anterior, así que cambiar de tratamiento arrastraría el campo
     // viejo y el documento quedaría declarando dos IVA distintos.
     const retenido = draft.tratamientoIva === 'retenido'
-    const referida = purchases.value.find((p) => p._id === draft.referenciaId)
+    const referida = comprasReferenciables.value.find((p) => p._id === draft.referenciaId)
 
     const payload: PurchaseWrite = {
       supplierId: draft.supplierId,
@@ -372,6 +384,8 @@ async function handleSave(): Promise<void> {
       await create(payload as Partial<Purchase>)
     }
     dialogVisible.value = false
+    // Lo recién guardado tiene que poder referenciarse desde una nota.
+    invalidarReferenciables()
     toast.add({ severity: 'success', summary: 'Guardado', life: 2500 })
   } catch (e) {
     toast.add({
@@ -534,7 +548,21 @@ onMounted(async () => {
       <Button label="Eliminar seleccionados" icon="pi pi-trash" severity="danger" text @click="confirmDeleteSelected" />
     </div>
 
-    <DataTable v-model:selection="selectedPurchases" :value="filteredPurchases" :loading="loading" data-key="_id" striped-rows>
+    <DataTable
+      v-model:selection="selectedPurchases"
+      :value="purchases"
+      :loading="loading"
+      data-key="_id"
+      striped-rows
+      lazy
+      paginator
+      :rows="porPagina"
+      :total-records="totalCompras"
+      :first="desdeCompras"
+      current-page-report-template="{first}–{last} de {totalRecords}"
+      paginator-template="FirstPageLink PrevPageLink CurrentPageReport NextPageLink LastPageLink"
+      @page="irA($event.first)"
+    >
       <Column selection-mode="multiple" style="width: 3rem" />
 
       <Column header="Proveedor">
