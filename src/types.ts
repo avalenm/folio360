@@ -402,6 +402,12 @@ export interface Purchase {
   ivaRetenidoTotal?: number
   referencia?: PurchaseReferencia
   montoTotal: number
+  // Los abonos al proveedor. `montoPagado` es su suma y `pagado` el derivado
+  // (montoPagado >= montoTotal); los dos los calcula el servidor. Ausentes en
+  // las compras anteriores a los abonos parciales, donde solo existía el
+  // switch `pagado` — ver purchase.model.ts en el servidor.
+  pagos?: DtePago[]
+  montoPagado?: number
   pagado: boolean
   // Decide si el documento va al Libro de Compras con su código electrónico
   // (33) o manual (30). Ausente = electrónico.

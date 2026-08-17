@@ -122,7 +122,86 @@ function limpiarFiltros(): void {
   filterFechas.value = null
 }
 
+// Lo que queda por pagarle al proveedor. Las compras anteriores a los abonos
+// no tienen `montoPagado`: ahí manda el switch, que era todo o nada.
+function abonadoDe(purchase: Purchase): number {
+  if (typeof purchase.montoPagado === 'number') return purchase.montoPagado
+  return purchase.pagado ? purchase.montoTotal : 0
+}
+
+function formatMoney(valor: number): string {
+  return valor.toLocaleString('es-CL')
+}
+
+function saldoDe(purchase: Purchase): number {
+  return Math.max(0, purchase.montoTotal - abonadoDe(purchase))
+}
+
 const selectedPurchases = ref<Purchase[]>([])
+
+// ---- Abonos ----
+const pagoVisible = ref(false)
+const pagoPurchase = ref<Purchase | null>(null)
+const pagoMonto = ref<number | null>(null)
+const pagoFecha = ref<Date>(new Date())
+const pagoMedio = ref('')
+const pagoNota = ref('')
+const pagoSending = ref(false)
+
+const pagosDelDocumento = computed(() => pagoPurchase.value?.pagos ?? [])
+
+// Una compra anterior a los abonos puede estar marcada pagada sin detalle:
+// se dice, en vez de mostrar un historial vacío que parecería un error.
+const pagadaSinDetalle = computed(
+  () => !!pagoPurchase.value && abonadoDe(pagoPurchase.value) > 0 && pagosDelDocumento.value.length === 0
+)
+
+function abrirPagos(purchase: Purchase): void {
+  pagoPurchase.value = purchase
+  pagoMonto.value = saldoDe(purchase) || null
+  pagoFecha.value = new Date()
+  pagoMedio.value = ''
+  pagoNota.value = ''
+  pagoVisible.value = true
+}
+
+async function guardarPagos(pagos: Purchase['pagos']): Promise<void> {
+  const purchase = pagoPurchase.value
+  if (!purchase) return
+
+  pagoSending.value = true
+  try {
+    const actualizada = await update(purchase._id, { pagos } as Partial<Purchase>)
+    pagoPurchase.value = actualizada
+    pagoMonto.value = saldoDe(actualizada) || null
+  } catch (e) {
+    toast.add({
+      severity: 'error',
+      summary: 'Error al registrar el abono',
+      detail: e instanceof Error ? e.message : undefined,
+      life: 4000
+    })
+  } finally {
+    pagoSending.value = false
+  }
+}
+
+async function agregarPago(): Promise<void> {
+  if (!pagoPurchase.value || !pagoMonto.value || pagoMonto.value <= 0) return
+  await guardarPagos([
+    ...pagosDelDocumento.value,
+    {
+      monto: pagoMonto.value,
+      fecha: pagoFecha.value.toISOString(),
+      medio: pagoMedio.value || undefined,
+      nota: pagoNota.value || undefined
+    }
+  ])
+}
+
+async function eliminarPago(indice: number): Promise<void> {
+  await guardarPagos(pagosDelDocumento.value.filter((_, i) => i !== indice))
+}
 
 function confirmDeleteSelected(): void {
   confirm.require({
@@ -399,9 +478,15 @@ async function handleSave(): Promise<void> {
   }
 }
 
+// El switch es el atajo para el caso más común —pagar todo de una— y por eso
+// escribe ABONOS, no el derivado: `pagado` lo calcula el servidor a partir de
+// ellos. Apagarlo borra los abonos, que es lo que significa "no está pagada".
 async function togglePagado(purchase: Purchase): Promise<void> {
+  const saldado = saldoDe(purchase) <= 0
   try {
-    await update(purchase._id, { pagado: !purchase.pagado })
+    await update(purchase._id, {
+      pagos: saldado ? [] : [{ monto: saldoDe(purchase), fecha: new Date().toISOString(), nota: 'Pago total' }]
+    } as Partial<Purchase>)
   } catch (e) {
     toast.add({
       severity: 'error',
@@ -487,7 +572,16 @@ const rowMenuItems = computed<MenuItem[]>(() => {
   const purchase = menuPurchase.value
   if (!purchase) return []
 
-  const items: MenuItem[] = [{ label: 'Editar', icon: 'pi pi-pencil', command: () => openEdit(purchase) }]
+  const items: MenuItem[] = [
+    { label: 'Editar', icon: 'pi pi-pencil', command: () => openEdit(purchase) },
+    // También en las saldadas: el diálogo es el historial de abonos, no solo
+    // el formulario — hay que poder consultarlo y corregirlo después.
+    {
+      label: saldoDe(purchase) > 0 ? 'Registrar abono' : 'Ver abonos',
+      icon: 'pi pi-dollar',
+      command: () => abrirPagos(purchase)
+    }
+  ]
 
   if (purchase.tipoDocumento === 'factura') {
     items.push({ label: 'Acuse/reclamo SII', icon: 'pi pi-verified', command: () => openAcuse(purchase) })
@@ -593,7 +687,14 @@ onMounted(async () => {
 
       <Column header="Pagado">
         <template #body="{ data }">
-          <ToggleSwitch :model-value="data.pagado" @update:model-value="togglePagado(data)" />
+          <div class="stacked-cell">
+            <ToggleSwitch :model-value="saldoDe(data) <= 0" @update:model-value="togglePagado(data)" />
+            <!-- Un abono parcial no se ve en un switch: sin esto, la fila
+                 diría "no pagada" igual que una en la que no se abonó nada. -->
+            <span v-if="abonadoDe(data) > 0 && saldoDe(data) > 0" class="muted">
+              abonado ${{ formatMoney(abonadoDe(data)) }}, quedan ${{ formatMoney(saldoDe(data)) }}
+            </span>
+          </div>
         </template>
       </Column>
 
@@ -744,10 +845,100 @@ onMounted(async () => {
         </div>
       </div>
     </Dialog>
+    <Dialog v-model:visible="pagoVisible" modal header="Abonos de la compra" style="width: 540px">
+      <div v-if="pagoPurchase" class="pago-body">
+        <div class="pago-resumen">
+          <div class="pago-resumen-item">
+            <span class="pago-resumen-label">Total</span>
+            <span class="pago-resumen-value">${{ formatMoney(pagoPurchase.montoTotal) }}</span>
+          </div>
+          <div class="pago-resumen-item">
+            <span class="pago-resumen-label">Abonado</span>
+            <span class="pago-resumen-value pago-abonado">${{ formatMoney(abonadoDe(pagoPurchase)) }}</span>
+          </div>
+          <div class="pago-resumen-item">
+            <span class="pago-resumen-label">Saldo</span>
+            <span class="pago-resumen-value pago-saldo">${{ formatMoney(saldoDe(pagoPurchase)) }}</span>
+          </div>
+        </div>
+
+        <section class="pago-section">
+          <h3 class="section-title">Historial</h3>
+
+          <p v-if="pagadaSinDetalle" class="pago-empty">
+            Esta compra quedó marcada como pagada antes de que se guardara el detalle por abono, por eso no
+            aparece desglosada.
+          </p>
+          <p v-else-if="pagosDelDocumento.length === 0" class="pago-empty">Todavía no hay abonos registrados.</p>
+
+          <ul v-else class="pago-list">
+            <li v-for="(pago, index) in pagosDelDocumento" :key="index" class="pago-item">
+              <span class="pago-item-fecha">{{ new Date(pago.fecha).toLocaleDateString('es-CL') }}</span>
+              <span class="pago-item-detalle">
+                <span class="pago-item-medio">{{ pago.medio || '—' }}</span>
+                <span v-if="pago.nota" class="pago-item-nota">{{ pago.nota }}</span>
+              </span>
+              <span class="pago-item-monto">${{ formatMoney(pago.monto) }}</span>
+              <Button
+                icon="pi pi-times"
+                text
+                severity="danger"
+                :disabled="pagoSending"
+                title="Eliminar abono"
+                @click="eliminarPago(index)"
+              />
+            </li>
+          </ul>
+        </section>
+
+        <section v-if="saldoDe(pagoPurchase) > 0" class="pago-section">
+          <h3 class="section-title">Registrar abono</h3>
+          <div class="pago-form">
+            <label class="field">
+              <span>Monto</span>
+              <InputNumber v-model="pagoMonto" :min="0" :max="saldoDe(pagoPurchase)" :max-fraction-digits="0" fluid />
+            </label>
+            <label class="field">
+              <span>Fecha</span>
+              <DatePicker v-model="pagoFecha" date-format="dd/mm/yy" show-icon icon-display="input" fluid />
+            </label>
+            <label class="field">
+              <span>Medio</span>
+              <InputText v-model="pagoMedio" placeholder="Transferencia, cheque…" />
+            </label>
+            <label class="field">
+              <span>Nota</span>
+              <InputText v-model="pagoNota" />
+            </label>
+          </div>
+          <div class="form-actions">
+            <Button label="Agregar abono" icon="pi pi-plus" :loading="pagoSending" @click="agregarPago" />
+          </div>
+        </section>
+      </div>
+    </Dialog>
   </div>
 </template>
 
 <style scoped>
+.pago-body { display: flex; flex-direction: column; gap: 1.1rem; }
+.pago-resumen { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.75rem; background: #f8fafc; border-radius: 8px; padding: 0.85rem 1rem; }
+.pago-resumen-item { display: flex; flex-direction: column; gap: 0.15rem; }
+.pago-resumen-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: #94a3b8; font-weight: 700; }
+.pago-resumen-value { font-weight: 700; font-variant-numeric: tabular-nums; }
+.pago-abonado { color: #15803d; }
+.pago-saldo { color: #b45309; }
+.pago-section { display: flex; flex-direction: column; gap: 0.5rem; }
+.section-title { margin: 0; font-size: 0.85rem; color: #475569; }
+.pago-empty { margin: 0; font-size: 0.83rem; color: #64748b; }
+.pago-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.25rem; }
+.pago-item { display: grid; grid-template-columns: auto 1fr auto auto; align-items: center; gap: 0.6rem; padding: 0.35rem 0; border-bottom: 1px solid #f1f5f9; font-size: 0.85rem; }
+.pago-item-fecha { color: #64748b; font-variant-numeric: tabular-nums; }
+.pago-item-detalle { display: flex; flex-direction: column; }
+.pago-item-nota { font-size: 0.75rem; color: #94a3b8; }
+.pago-item-monto { font-weight: 650; font-variant-numeric: tabular-nums; }
+.pago-form { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+
 .page-header {
   display: flex;
   align-items: center;
