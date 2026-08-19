@@ -143,6 +143,7 @@ export const AYUDA_CASILLA: SeccionAyuda[] = [
     titulo: 'Claves',
     items: [
       { nombre: 'Correo saliente', descripcion: 'La misma casilla se usa para ENVIAR: tus DTE a los clientes, los acuses y las aceptaciones a proveedores (SMTP con las mismas credenciales).' },
+      { nombre: 'Servidor de salida (SMTP) — opcional', descripcion: 'Solo si el envío directo está bloqueado (los datacenters suelen bloquear los puertos SMTP estándar): un relay transaccional con sus propias credenciales y el dominio del correo verificado (SPF/DKIM), típicamente en el puerto 2525. Vacío = se usa el servidor del proveedor de la casilla.' },
       { nombre: 'Último polling / error', descripcion: 'Cuándo se revisó por última vez y si hubo problemas de conexión.' }
     ]
   }

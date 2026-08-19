@@ -427,6 +427,11 @@ export interface MailboxConfig {
   imapPort: number
   imapSecure: boolean
   imapUsuario: string
+  // Relay SMTP de salida (opcional): sin estos campos, el envío se deriva
+  // del IMAP. La contraseña del relay nunca viaja de vuelta al frontend.
+  smtpHost?: string
+  smtpPort?: number
+  smtpUsuario?: string
   activo: boolean
   ultimoPolling?: string
   ultimoError?: string

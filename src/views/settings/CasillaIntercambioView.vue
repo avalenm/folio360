@@ -29,11 +29,43 @@ interface Draft {
   imapSecure: boolean
   imapUsuario: string
   password: string
+  smtpHost: string
+  smtpPort: number | null
+  smtpUsuario: string
+  smtpPassword: string
   activo: boolean
 }
 
 function emptyDraft(): Draft {
-  return { email: '', imapHost: '', imapPort: 993, imapSecure: true, imapUsuario: '', password: '', activo: true }
+  return {
+    email: '',
+    imapHost: '',
+    imapPort: 993,
+    imapSecure: true,
+    imapUsuario: '',
+    password: '',
+    smtpHost: '',
+    smtpPort: null,
+    smtpUsuario: '',
+    smtpPassword: '',
+    activo: true
+  }
+}
+
+function draftFromCurrent(config: MailboxConfig): Partial<Draft> {
+  return {
+    email: config.email,
+    imapHost: config.imapHost,
+    imapPort: config.imapPort,
+    imapSecure: config.imapSecure,
+    imapUsuario: config.imapUsuario,
+    password: '',
+    smtpHost: config.smtpHost ?? '',
+    smtpPort: config.smtpPort ?? null,
+    smtpUsuario: config.smtpUsuario ?? '',
+    smtpPassword: '',
+    activo: config.activo
+  }
 }
 
 const draft = reactive<Draft>(emptyDraft())
@@ -43,17 +75,7 @@ async function fetchCurrent(): Promise<void> {
   try {
     const result = await feathersClient.service('mailbox-config').find()
     current.value = (Array.isArray(result) ? result : result.data)[0] ?? null
-    if (current.value) {
-      Object.assign(draft, {
-        email: current.value.email,
-        imapHost: current.value.imapHost,
-        imapPort: current.value.imapPort,
-        imapSecure: current.value.imapSecure,
-        imapUsuario: current.value.imapUsuario,
-        password: '',
-        activo: current.value.activo
-      })
-    }
+    if (current.value) Object.assign(draft, draftFromCurrent(current.value))
   } finally {
     loading.value = false
   }
@@ -65,19 +87,8 @@ function startEdit(): void {
 
 function cancelEdit(): void {
   editing.value = false
-  if (current.value) {
-    Object.assign(draft, {
-      email: current.value.email,
-      imapHost: current.value.imapHost,
-      imapPort: current.value.imapPort,
-      imapSecure: current.value.imapSecure,
-      imapUsuario: current.value.imapUsuario,
-      password: '',
-      activo: current.value.activo
-    })
-  } else {
-    Object.assign(draft, emptyDraft())
-  }
+  if (current.value) Object.assign(draft, draftFromCurrent(current.value))
+  else Object.assign(draft, emptyDraft())
 }
 
 async function handleSave(): Promise<void> {
@@ -90,6 +101,12 @@ async function handleSave(): Promise<void> {
       imapSecure: draft.imapSecure,
       imapUsuario: draft.imapUsuario,
       password: draft.password,
+      // El relay de salida es opcional: los campos vacíos no se envían y el
+      // servidor vuelve al SMTP derivado del IMAP.
+      smtpHost: draft.smtpHost || undefined,
+      smtpPort: draft.smtpPort ?? undefined,
+      smtpUsuario: draft.smtpUsuario || undefined,
+      smtpPassword: draft.smtpPassword || undefined,
       activo: draft.activo
     })
     editing.value = false
@@ -154,6 +171,9 @@ onMounted(fetchCurrent)
         <div>
           <strong>{{ current.email }}</strong>
           <span class="muted">{{ current.imapHost }}:{{ current.imapPort }} ({{ current.imapUsuario }})</span>
+          <span v-if="current.smtpHost" class="muted">
+            Salida por relay: {{ current.smtpHost }}:{{ current.smtpPort ?? 465 }} ({{ current.smtpUsuario ?? current.imapUsuario }})
+          </span>
         </div>
         <Tag :severity="current.activo ? 'success' : 'secondary'" :value="current.activo ? 'Activo' : 'Desactivado'" />
       </div>
@@ -204,6 +224,35 @@ onMounted(fetchCurrent)
             <Password v-model="draft.password" :feedback="false" toggle-mask required />
           </label>
         </div>
+
+        <fieldset class="smtp-relay">
+          <legend>Servidor de salida (SMTP) — opcional</legend>
+          <p class="relay-hint">
+            Déjalo vacío para usar el servidor del mismo proveedor de la casilla. Configúralo solo si el envío
+            directo está bloqueado (por ejemplo, el servidor de Folio360 corre en un datacenter que bloquea los
+            puertos SMTP estándar) usando un relay transaccional con el dominio verificado.
+          </p>
+          <div class="form-row">
+            <label class="field field-grow">
+              <span>Servidor SMTP</span>
+              <InputText v-model="draft.smtpHost" placeholder="mail.smtp2go.com" />
+            </label>
+            <label class="field">
+              <span>Puerto</span>
+              <InputNumber v-model="draft.smtpPort" :use-grouping="false" :min="1" :max="65535" placeholder="2525" />
+            </label>
+          </div>
+          <div class="form-row">
+            <label class="field field-grow">
+              <span>Usuario SMTP</span>
+              <InputText v-model="draft.smtpUsuario" />
+            </label>
+            <label class="field field-grow">
+              <span>Contraseña SMTP</span>
+              <Password v-model="draft.smtpPassword" :feedback="false" toggle-mask />
+            </label>
+          </div>
+        </fieldset>
 
         <label class="field toggle-field">
           <ToggleSwitch v-model="draft.activo" />
@@ -285,6 +334,29 @@ onMounted(fetchCurrent)
   flex-direction: row;
   align-items: center;
   gap: 0.6rem;
+}
+
+.smtp-relay {
+  border: 1px solid var(--surface-border, #e2e8f0);
+  border-radius: 6px;
+  padding: 0.9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.smtp-relay legend {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #334155;
+  padding: 0 0.3rem;
+}
+
+.relay-hint {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 400;
+  color: var(--text-secondary);
 }
 
 .muted {
