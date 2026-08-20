@@ -99,7 +99,7 @@ export const AYUDA_FACTURAS_RECIBIDAS: SeccionAyuda[] = [
   {
     titulo: 'RCV y plazo de reclamo',
     items: [
-      { nombre: 'Buscar en el RCV', descripcion: 'Consulta el Registro de Compras del SII (mes actual y anterior) y trae las facturas que el proveedor no mandó por correo. El sistema lo hace solo cada 6 horas; el botón es para no esperar.' },
+      { nombre: 'Buscar en el RCV', descripcion: 'Consulta el Registro de Compras del SII (mes actual y anterior) y trae las facturas que el proveedor no mandó por correo. El sistema lo hace solo cada hora; el botón es para no esperar.' },
       { nombre: 'Detectada en el RCV', descripcion: 'Esa factura no llegó por correo — no hay a quién responderle el intercambio, pero el reclamo ante el SII funciona igual.' },
       { nombre: 'Plazo de reclamo', descripcion: 'Los 8 días corridos desde la recepción en el SII para reclamar una factura (Ley 19.983). Vencido el plazo opera la aceptación tácita: la factura queda aceptada aunque no hagas nada, con derecho a crédito fiscal para ti y mérito ejecutivo para el emisor.' }
     ]
