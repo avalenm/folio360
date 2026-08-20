@@ -148,6 +148,7 @@ export interface ResumenCuentas {
     ivaUsoComun: number
     factorProporcionalidad: number
     ivaSinDerechoACredito: number
+    ingresosBrutos: number
   }
   evolucion: { mes: string; ventas: number; compras: number; margen: number }[]
   posicionNeta: number

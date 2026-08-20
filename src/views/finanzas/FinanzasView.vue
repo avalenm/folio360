@@ -3,6 +3,7 @@ import AyudaPagina from '@/components/AyudaPagina.vue'
 import { computed, onMounted, ref } from 'vue'
 import Select from 'primevue/select'
 import { feathersClient } from '@/services/feathers'
+import { useAuthStore } from '@/stores/auth'
 import type { SeccionAyuda } from '@/components/AyudaPagina.vue'
 import {
   DIAS_PARA_REVISAR_INCOBRABLE,
@@ -43,6 +44,17 @@ const ivaMes = computed(() => ({
   sinCredito: resumen.value?.mes.ivaSinDerechoACredito ?? 0
 }))
 const posicionNeta = computed(() => resumen.value?.posicionNeta ?? 0)
+
+// ---- PPM y total estimado del F29 ----
+// El PPM (pago provisional mensual) es un % de los ingresos brutos del mes
+// que se paga en el mismo F29. La tasa vive en la organización (depende del
+// régimen tributario; 1% si no se ha configurado).
+const auth = useAuthStore()
+const tasaPpm = computed(() => auth.currentOrganization?.tasaPpmPct ?? 1)
+const ppmMes = computed(() => Math.round(((resumen.value?.mes.ingresosBrutos ?? 0) * tasaPpm.value) / 100))
+// Si el IVA del mes sale a favor (crédito > débito), en el F29 no se paga
+// IVA — el remanente queda para el mes siguiente — pero el PPM se paga igual.
+const totalF29 = computed(() => Math.max(ivaMes.value.neto, 0) + ppmMes.value)
 
 // El IVA que la empresa puso de su bolsillo por facturas que no le pagaron.
 const AGING_CERO_IVA = { total: 0, porVencer: 0, v1a30: 0, v31a60: 0, v61a90: 0, vMas90: 0 }
@@ -137,6 +149,7 @@ const AYUDA_FINANZAS: SeccionAyuda[] = [
       { nombre: 'Certificación', descripcion: 'Los documentos y compras de prueba nunca se suman a los de producción: cada uno cuenta solo en su ambiente.' },
       { nombre: 'Exportaciones', descripcion: 'Los totales van en pesos, convertidos con el tipo de cambio del DÍA DE EMISIÓN de cada documento — es lo único sumable y lo que calza con lo que declaras al SII. Junto a cada documento se muestra su moneda real, y acá aparece aparte cuánto del total depende del tipo de cambio.' },
       { nombre: 'IVA estimado', descripcion: 'Débito (ventas del mes) menos crédito (compras del mes): lo que se pagaría en el F29. Es referencial.' },
+      { nombre: 'PPM y total F29', descripcion: 'El PPM (pago provisional mensual) es un % de los ingresos brutos del mes que se paga en el mismo F29 como anticipo del impuesto anual — la tasa se configura en Organizaciones (depende del régimen; confírmala con tu contador). El total estimado suma IVA a pagar + PPM; si el IVA sale a favor, se paga solo el PPM y el remanente pasa al mes siguiente.' },
       { nombre: 'IVA de uso común', descripcion: 'El de compras que sirven a la vez a ventas afectas y exentas. Da crédito solo en la proporción de ventas afectas del mes (el factor). OJO: el factor legal se acumula desde enero del año comercial, así que este es una estimación del mes — el definitivo lo determina quien declara.' },
       { nombre: 'IVA sin derecho a crédito', descripcion: 'Se pagó pero no se descuenta (gastos rechazados, entregas gratuitas, facturas fuera de plazo). Se informa aparte porque es un costo real que no aparece en ninguna otra cifra.' },
       { nombre: 'Liquidaciones (43)', descripcion: 'No se cuentan como venta ni cobranza: su total es la rendición al mandante, no ingreso propio.' },
@@ -205,6 +218,11 @@ onMounted(async () => {
           <span v-if="ivaMes.sinCredito !== 0" class="detalle">
             ${{ fm(ivaMes.sinCredito) }} de IVA pagado SIN derecho a crédito, que no se descuenta
           </span>
+          <span class="detalle">+ PPM ({{ tasaPpm }}% de ingresos brutos): ${{ fm(ppmMes) }}</span>
+          <span v-if="ivaMes.neto < 0" class="detalle">
+            IVA a favor: queda ${{ fm(-ivaMes.neto) }} de remanente para el mes siguiente
+          </span>
+          <span class="total-f29">Total estimado a pagar (F29): ${{ fm(totalF29) }}</span>
         </div>
       </div>
 
@@ -489,6 +507,7 @@ onMounted(async () => {
 .positivo { color: #15803d; }
 .negativo { color: #b91c1c; }
 .detalle { font-size: 0.78rem; color: #64748b; }
+.total-f29 { font-size: 0.85rem; font-weight: 700; margin-top: 0.35rem; padding-top: 0.35rem; border-top: 1px solid #e2e8f0; }
 .panel { background: #fff; border-radius: 10px; padding: 1.25rem; margin-bottom: 1rem; }
 .panel h2 { margin: 0 0 1rem; font-size: 1rem; }
 .panel h3 { margin: 1.1rem 0 0.5rem; font-size: 0.85rem; color: #475569; }

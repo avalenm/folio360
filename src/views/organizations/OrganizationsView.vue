@@ -251,6 +251,14 @@ async function confirmarCambioAmbiente(): Promise<void> {
           (en certificación es la del ambiente de pruebas). Va impresa en cada documento.
         </p>
         <label class="field">
+          <span>Tasa PPM (%) — para la estimación del F29 en Finanzas</span>
+          <InputNumber v-model="draft.tasaPpmPct" :min="0" :max="10" :max-fraction-digits="2" suffix=" %" />
+        </label>
+        <p class="nota">
+          Pago Provisional Mensual: depende del régimen tributario (Pro Pyme parte en 0,25%; régimen
+          general usa tasa variable). Confírmala con tu contador.
+        </p>
+        <label class="field">
           <span>Logo (PNG o JPEG, máx. 300 KB)</span>
           <input type="file" accept="image/png,image/jpeg" @change="onLogoChange" />
         </label>
