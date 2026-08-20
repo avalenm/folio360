@@ -255,9 +255,13 @@ const filterFolio = ref('')
 const filterTipo = ref<number | null>(null)
 const filterCliente = ref('')
 const filterEstado = ref<string | null>(null)
-const filterAmbiente = ref<string | null>(null)
 // Mientras la organización certifica no hay nada que separar.
 const esCertificacion = computed(() => auth.currentOrganization?.ambiente === 'certificacion')
+// En producción la lista parte mostrando SOLO los documentos reales: los de
+// certificación quedan como historial, visibles solo eligiendo ese ambiente
+// en el filtro. Mezclarlos por defecto se presta a confusión (y a mandarle
+// a un cliente un documento de prueba).
+const filterAmbiente = ref<string | null>(esCertificacion.value ? null : 'produccion')
 const filterFechas = ref<Date[] | null>(null)
 
 const filtrosDocumentos = computed(() => ({
@@ -275,7 +279,9 @@ function limpiarFiltros(): void {
   filterTipo.value = null
   filterCliente.value = ''
   filterEstado.value = null
-  filterAmbiente.value = null
+  // "Limpiar" vuelve al punto de partida de la vista, y en producción ese
+  // punto de partida es ver solo producción — no "todos los ambientes".
+  filterAmbiente.value = esCertificacion.value ? null : 'produccion'
   filterFechas.value = null
 }
 
