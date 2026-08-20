@@ -3,7 +3,9 @@ import AyudaPagina from '@/components/AyudaPagina.vue'
 import { AYUDA_ORGANIZACIONES } from '@/ayudaContenidos'
 import { computed, reactive, ref } from 'vue'
 import Button from 'primevue/button'
+import DatePicker from 'primevue/datepicker'
 import Dialog from 'primevue/dialog'
+import InputNumber from 'primevue/inputnumber'
 import InputText from 'primevue/inputtext'
 import Tag from 'primevue/tag'
 import { useToast } from 'primevue/usetoast'
@@ -55,9 +57,17 @@ const AMBIENTE_LABEL: Record<Ambiente, string> = {
   produccion: 'Producción'
 }
 
+// La resolución que autoriza a la empresa como emisor electrónico (llega en
+// el correo del SII al aprobar la Declaración de Cumplimiento) — va impresa
+// en la leyenda de cada documento y en la carátula de cada envío. El
+// DatePicker trabaja con Date, así que la fecha vive en su propio ref y se
+// serializa al guardar.
+const resolucionFechaDraft = ref<Date | null>(null)
+
 function openEdit(org: Organization): void {
   editingId.value = org._id
   Object.assign(draft, org)
+  resolucionFechaDraft.value = org.resolucionFecha ? new Date(org.resolucionFecha) : null
   dialogVisible.value = true
 }
 
@@ -112,7 +122,9 @@ async function guardar(id: string, cambios: Partial<Organization>, mensaje: stri
 
 async function handleSave(): Promise<void> {
   if (!editingId.value) return
-  if (await guardar(editingId.value, draft, 'Guardado')) dialogVisible.value = false
+  const cambios: Partial<Organization> = { ...draft }
+  if (resolucionFechaDraft.value) cambios.resolucionFecha = resolucionFechaDraft.value.toISOString()
+  if (await guardar(editingId.value, cambios, 'Guardado')) dialogVisible.value = false
 }
 
 // ---- Cambio de ambiente ----
@@ -224,6 +236,20 @@ async function confirmarCambioAmbiente(): Promise<void> {
           <span>Unidad del SII (para la representación impresa)</span>
           <InputText v-model="draft.unidadSii" placeholder="Ej: SANTIAGO ORIENTE" />
         </label>
+        <div class="form-row">
+          <label class="field field-grow">
+            <span>N° Resolución SII</span>
+            <InputNumber v-model="draft.resolucionNumero" :use-grouping="false" :min="0" />
+          </label>
+          <label class="field field-grow">
+            <span>Fecha de la Resolución</span>
+            <DatePicker v-model="resolucionFechaDraft" date-format="dd-mm-yy" show-icon />
+          </label>
+        </div>
+        <p class="nota">
+          La resolución viene en el correo del SII que autoriza a la empresa como emisor electrónico
+          (en certificación es la del ambiente de pruebas). Va impresa en cada documento.
+        </p>
         <label class="field">
           <span>Logo (PNG o JPEG, máx. 300 KB)</span>
           <input type="file" accept="image/png,image/jpeg" @change="onLogoChange" />
@@ -457,6 +483,16 @@ async function confirmarCambioAmbiente(): Promise<void> {
   font-size: 0.85rem;
   font-weight: 600;
   color: #334155;
+}
+
+.form-row {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.field-grow {
+  flex: 1;
+  min-width: 0;
 }
 
 .nota {
