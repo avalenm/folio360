@@ -116,6 +116,15 @@ export const AYUDA_FACTURAS_RECIBIDAS: SeccionAyuda[] = [
     ]
   },
   {
+    titulo: 'Aceptar vs. Registrar — la diferencia',
+    items: [
+      { nombre: 'En tu contabilidad: ninguna', descripcion: 'Ambas convierten la factura en una Compra (por pagar, Finanzas, crédito de IVA). La diferencia es lo que pasa FUERA del sistema.' },
+      { nombre: 'Aceptar = declaración jurídica', descripcion: 'Declara ante el SII que aceptas la factura: renuncias a reclamarla (aunque queden días de plazo) y le confirmas al emisor el mérito ejecutivo (puede cederla a factoring sin esperar los 8 días). Además le envía la aceptación firmada por correo.' },
+      { nombre: 'Registrar = solo hecho contable', descripcion: 'Ante el SII no declaras nada — y eso conserva tu derecho a reclamo mientras dure el plazo. Ojo: si después reclamas (en sii.cl), la compra registrada hay que eliminarla a mano.' },
+      { nombre: 'Regla práctica', descripcion: 'Revisada y correcta, dentro de plazo → Aceptar (cierra el ciclo). No estás 100% seguro todavía → Registrar sin aviso (te guardas el derecho a reclamo). Plazo vencido o al contado → Registrar sin aviso (única que corresponde).' }
+    ]
+  },
+  {
     titulo: '¿Qué opción uso? (guía rápida)',
     items: [
       { nombre: 'Factura correcta, dentro de plazo', descripcion: 'Aceptar contenido (o Acuse recibo si quieres dejar constancia de la recepción física).' },
