@@ -165,7 +165,11 @@ function confirmRecepcionar(purchase: Purchase): void {
   })
 }
 
-async function fetchColeccionCompleta<T>(service: string, select?: string[]): Promise<T[]> {
+async function fetchColeccionCompleta<T>(
+  service: string,
+  select?: string[],
+  extraQuery?: Record<string, unknown>
+): Promise<T[]> {
   // Solo los campos que los cálculos usan: sin $select cada documento viaja
   // con su XML firmado completo y sus ítems (~10-30 KB c/u) — varios MB para
   // sumar cuatro números, que era lo que hacía lenta la página. La primera
@@ -174,7 +178,8 @@ async function fetchColeccionCompleta<T>(service: string, select?: string[]): Pr
     $limit: 100,
     $skip: skip,
     $sort: { createdAt: -1 },
-    ...(select ? { $select: select } : {})
+    ...(select ? { $select: select } : {}),
+    ...(extraQuery ?? {})
   })
 
   const primera = (await feathersClient.service(service).find({ query: query(0) })) as Paginated<T> | T[]
@@ -207,7 +212,14 @@ onMounted(async () => {
       // para sumarlos acá.
       feathersClient.service('resumen-cuentas').find() as Promise<ResumenCuentas>,
       // Los recientes para la tabla del final: 5 filas, no la colección.
-      fetchColeccionCompleta<DteDocument>('documents', ['tipoDte', 'folio', 'estado', 'montos', 'fechaEmision', 'createdAt', 'customerId', 'supplierId', 'trackId']),
+      // Solo el ambiente actual — mismo criterio que resumen-cuentas en el
+      // servidor: los documentos de certificación no se mezclan con los
+      // reales (las compras ya llegan filtradas por el servidor).
+      fetchColeccionCompleta<DteDocument>(
+        'documents',
+        ['tipoDte', 'folio', 'estado', 'montos', 'fechaEmision', 'createdAt', 'customerId', 'supplierId', 'trackId'],
+        { ambiente: auth.currentOrganization?.ambiente }
+      ),
       auth.hasMinRole('contador') ? fetchColeccionCompleta<Purchase>('purchases') : Promise.resolve([]),
       fetchColeccionCompleta<Supplier>('suppliers'),
       auth.hasMinRole('contador')
