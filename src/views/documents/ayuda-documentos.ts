@@ -23,6 +23,7 @@ export const AYUDA_DOCUMENTOS: SeccionAyuda[] = [
     titulo: 'Botones principales',
     items: [
       { nombre: 'Nuevo documento', descripcion: 'Crea un borrador. El formulario se adapta al tipo elegido (referencias en notas, traslado en guías, comisiones en liquidaciones, aduana en exportación).' },
+      { nombre: 'Importar XML emitido', descripcion: 'Trae un DTE que la empresa emitió en OTRO sistema (p. ej. el facturador gratuito del SII, antes de migrar acá): sube el XML firmado descargado de sii.cl y entra como aceptado, con su timbre, PDF y montos — sin consumir folios ni enviar nada al SII. El cliente se crea solo si no existe.' },
       { nombre: 'Filtros', descripcion: 'Folio, tipo, cliente/RUT, estado y rango de fechas. "Limpiar filtros" restablece todo.' },
       { nombre: 'Enviar como set', descripcion: 'Con 2+ documentos firmados seleccionados: los sube al SII en UN solo sobre. Se usa casi solo en certificación; el día a día es "Enviar al SII" por documento.' },
       { nombre: 'Eliminar seleccionados', descripcion: 'Borra los borradores seleccionados (los demás estados no se pueden eliminar).' }

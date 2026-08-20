@@ -78,6 +78,45 @@ const auth = useAuthStore()
 const confirm = useConfirm()
 const toast = useToast()
 
+// --- Importar DTE emitidos en otro sistema (XML firmado desde sii.cl) ---
+const importInput = ref<HTMLInputElement | null>(null)
+const importando = ref(false)
+
+async function importarXml(event: Event): Promise<void> {
+  const input = event.target as HTMLInputElement
+  const files = Array.from(input.files ?? [])
+  input.value = ''
+  if (files.length === 0) return
+
+  importando.value = true
+  try {
+    for (const file of files) {
+      try {
+        const buffer = new Uint8Array(await file.arrayBuffer())
+        let binario = ''
+        for (const byte of buffer) binario += String.fromCharCode(byte)
+        const result = await feathersClient.service('import-dte-emitido').create({ xmlBase64: btoa(binario) })
+        toast.add({
+          severity: 'success',
+          summary: `Importado: tipo ${result.tipoDte} folio ${result.folio}`,
+          detail: file.name,
+          life: 3500
+        })
+      } catch (e) {
+        toast.add({
+          severity: 'error',
+          summary: `No se pudo importar ${file.name}`,
+          detail: e instanceof Error ? e.message : undefined,
+          life: 6000
+        })
+      }
+    }
+    await Promise.all([fetchAll(), fetchCustomers()])
+  } finally {
+    importando.value = false
+  }
+}
+
 const ambientes = [
   { label: 'Certificación', value: 'certificacion' },
   { label: 'Producción', value: 'produccion' }
@@ -1425,7 +1464,17 @@ onMounted(async () => {
   <div>
     <div class="page-header">
       <h1 class="page-title">Documentos <AyudaPagina titulo="Documentos" :secciones="AYUDA_DOCUMENTOS" /></h1>
-      <Button label="Nuevo documento" icon="pi pi-plus" @click="openCreate" />
+      <div class="header-actions">
+        <Button
+          label="Importar XML emitido"
+          icon="pi pi-upload"
+          outlined
+          :loading="importando"
+          @click="importInput?.click()"
+        />
+        <input ref="importInput" type="file" accept=".xml,text/xml" multiple hidden @change="importarXml" />
+        <Button label="Nuevo documento" icon="pi pi-plus" @click="openCreate" />
+      </div>
     </div>
 
     <div class="filters surface-card">
@@ -2453,6 +2502,11 @@ onMounted(async () => {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 1.25rem;
+}
+
+.header-actions {
+  display: flex;
+  gap: 0.5rem;
 }
 
 .page-title {
