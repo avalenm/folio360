@@ -78,9 +78,52 @@ const auth = useAuthStore()
 const confirm = useConfirm()
 const toast = useToast()
 
-// --- Importar DTE emitidos en otro sistema (XML firmado desde sii.cl) ---
+// --- Importar DTE emitidos en otro sistema ---
+// Dos vías: el XML firmado (completo, con timbre y PDF) o el Registro de
+// Ventas del SII (solo montos — para cuando el XML ya no es accesible, p.
+// ej. el facturador gratuito queda bloqueado al pasar a sistema de mercado).
 const importInput = ref<HTMLInputElement | null>(null)
+const importMenu = ref()
 const importando = ref(false)
+
+const importMenuItems: MenuItem[] = [
+  { label: 'Desde XML firmado (con timbre y PDF)', icon: 'pi pi-upload', command: () => importInput.value?.click() },
+  { label: 'Desde el Registro de Ventas del SII', icon: 'pi pi-sync', command: () => importarDesdeRcv() }
+]
+
+async function importarDesdeRcv(): Promise<void> {
+  importando.value = true
+  try {
+    const result = await feathersClient.service('import-ventas-rcv').create({})
+    if (result.importados.length === 0) {
+      toast.add({
+        severity: 'success',
+        summary: 'Nada que importar',
+        detail: `${result.revisados} documento(s) del registro ya estaban en el sistema`,
+        life: 4000
+      })
+    } else {
+      for (const doc of result.importados) {
+        toast.add({
+          severity: 'success',
+          summary: `Importado: tipo ${doc.tipoDte} folio ${doc.folio}`,
+          detail: `${doc.receptor} — $${doc.total.toLocaleString('es-CL')} (sin XML: el PDF no estará disponible)`,
+          life: 6000
+        })
+      }
+      await Promise.all([fetchAll(), fetchCustomers()])
+    }
+  } catch (e) {
+    toast.add({
+      severity: 'error',
+      summary: 'Error al importar desde el Registro de Ventas',
+      detail: e instanceof Error ? e.message : undefined,
+      life: 6000
+    })
+  } finally {
+    importando.value = false
+  }
+}
 
 async function importarXml(event: Event): Promise<void> {
   const input = event.target as HTMLInputElement
@@ -1465,13 +1508,8 @@ onMounted(async () => {
     <div class="page-header">
       <h1 class="page-title">Documentos <AyudaPagina titulo="Documentos" :secciones="AYUDA_DOCUMENTOS" /></h1>
       <div class="header-actions">
-        <Button
-          label="Importar XML emitido"
-          icon="pi pi-upload"
-          outlined
-          :loading="importando"
-          @click="importInput?.click()"
-        />
+        <Button label="Importar" icon="pi pi-download" outlined :loading="importando" @click="importMenu?.toggle($event)" />
+        <Menu ref="importMenu" :model="importMenuItems" :popup="true" />
         <input ref="importInput" type="file" accept=".xml,text/xml" multiple hidden @change="importarXml" />
         <Button label="Nuevo documento" icon="pi pi-plus" @click="openCreate" />
       </div>
