@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import AyudaPagina from '@/components/AyudaPagina.vue'
 import { computed, onMounted, ref } from 'vue'
+import Select from 'primevue/select'
 import { feathersClient } from '@/services/feathers'
 import type { SeccionAyuda } from '@/components/AyudaPagina.vue'
 import {
@@ -70,8 +71,40 @@ const evolucion = computed(() => {
   }))
 })
 
-// El mes en curso es la última columna de la evolución.
-const mesActual = computed(() => evolucion.value[evolucion.value.length - 1])
+// ---- Selector de mes ----
+// Por omisión el mes en curso (la última columna de la evolución). Elegir
+// otro re-pide el resumen al servidor con ?mes=AAAA-MM: el bloque de
+// ventas/IVA se recalcula para ese período; el aging y la posición neta
+// siguen siendo la foto de hoy (no tendría sentido "lo pendiente de julio").
+const mesSeleccionado = ref<string | null>(null)
+const cambiandoMes = ref(false)
+
+const opcionesMes = computed(() =>
+  [...evolucion.value].reverse().map((m) => ({ label: nombreMesLargo(m.mes), value: m.mes }))
+)
+
+const esMesEnCurso = computed(() => {
+  const ultimo = evolucion.value[evolucion.value.length - 1]?.mes
+  return !mesSeleccionado.value || mesSeleccionado.value === ultimo
+})
+
+async function cambiarMes(): Promise<void> {
+  cambiandoMes.value = true
+  try {
+    resumen.value = (await feathersClient
+      .service('resumen-cuentas')
+      .find({ query: mesSeleccionado.value ? { mes: mesSeleccionado.value } : {} })) as ResumenCuentas
+  } finally {
+    cambiandoMes.value = false
+  }
+}
+
+// Ventas/compras/margen del mes elegido salen de la evolución (que siempre
+// trae los 12 meses); el IVA sale del bloque `mes` recalculado en el server.
+const mesActual = computed(() => {
+  const porClave = evolucion.value.find((m) => m.mes === mesSeleccionado.value)
+  return porClave ?? evolucion.value[evolucion.value.length - 1]
+})
 
 function fm(valor: number): string {
   return valor.toLocaleString('es-CL')
@@ -80,6 +113,12 @@ function fm(valor: number): string {
 function nombreMes(clave: string): string {
   const [a, m] = clave.split('-')
   return `${['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'][Number(m) - 1]} ${a.slice(2)}`
+}
+
+function nombreMesLargo(clave: string): string {
+  const [a, m] = clave.split('-')
+  const meses = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
+  return `${meses[Number(m) - 1]} ${a}`
 }
 
 const AYUDA_FINANZAS: SeccionAyuda[] = [
@@ -91,6 +130,7 @@ const AYUDA_FINANZAS: SeccionAyuda[] = [
   {
     titulo: 'Cómo se calcula',
     items: [
+      { nombre: 'Selector de mes', descripcion: 'Las tarjetas del período (ventas, compras, margen, IVA) se pueden ver para cualquiera de los últimos 12 meses. El resto de la página (por cobrar/pagar, aging, posición neta) siempre es la foto de HOY: lo pendiente no tiene "mes".' },
       { nombre: 'Vencimientos', descripcion: 'Fecha de emisión + plazo pactado del cliente (ficha del cliente); sin pacto rigen los 30 días de la Ley 21.131. "Por vencer" es deuda sana; los tramos vencidos son la que hay que cobrar.' },
       { nombre: 'Notas de crédito', descripcion: 'Rebajan el saldo de la factura que referencian, no cuentan como línea aparte.' },
       { nombre: 'De dónde sale el "por pagar"', descripcion: 'De DOS lugares: las compras que registras (página Compras) y las facturas de compra que emites tú por cambio de sujeto, que viven en Documentos. El desglose de abajo muestra cada documento y en qué pantalla está.' },
@@ -122,17 +162,29 @@ onMounted(async () => {
     <p v-if="loading" class="cargando">Calculando…</p>
 
     <template v-else>
-      <h2 class="grupo-titulo">Este mes</h2>
-      <div class="tarjetas">
+      <div class="grupo-cabecera">
+        <h2 class="grupo-titulo">{{ esMesEnCurso ? 'Este mes' : nombreMesLargo(mesActual.mes) }}</h2>
+        <Select
+          v-model="mesSeleccionado"
+          :options="opcionesMes"
+          option-label="label"
+          option-value="value"
+          :placeholder="opcionesMes[0]?.label"
+          :loading="cambiandoMes"
+          size="small"
+          @change="cambiarMes"
+        />
+      </div>
+      <div class="tarjetas" :class="{ atenuado: cambiandoMes }">
         <div class="tarjeta">
           <span class="etiqueta">Ventas netas</span>
           <span class="valor">${{ fm(mesActual.ventas) }}</span>
-          <span class="detalle">mes en curso, por fecha de emisión</span>
+          <span class="detalle">{{ esMesEnCurso ? 'mes en curso' : nombreMesLargo(mesActual.mes).toLowerCase() }}, por fecha de emisión</span>
         </div>
         <div class="tarjeta">
           <span class="etiqueta">Compras</span>
           <span class="valor">${{ fm(mesActual.compras) }}</span>
-          <span class="detalle">mes en curso</span>
+          <span class="detalle">{{ esMesEnCurso ? 'mes en curso' : nombreMesLargo(mesActual.mes).toLowerCase() }}</span>
         </div>
         <div class="tarjeta">
           <span class="etiqueta">Margen</span>
@@ -140,7 +192,7 @@ onMounted(async () => {
           <span class="detalle">ventas − compras</span>
         </div>
         <div class="tarjeta">
-          <span class="etiqueta">IVA estimado del mes</span>
+          <span class="etiqueta">{{ esMesEnCurso ? 'IVA estimado del mes' : `IVA estimado de ${nombreMesLargo(mesActual.mes).toLowerCase()}` }}</span>
           <span class="valor">${{ fm(ivaMes.neto) }}</span>
           <span class="detalle">débito ${{ fm(ivaMes.debito) }} − crédito ${{ fm(ivaMes.credito) }}</span>
           <!-- El uso común da crédito solo en la proporción de ventas
@@ -427,6 +479,9 @@ onMounted(async () => {
 .page-title { margin: 0 0 1.25rem; font-size: 1.4rem; }
 .cargando { color: var(--text-secondary, #64748b); }
 .grupo-titulo { margin: 0 0 0.6rem; font-size: 0.78rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #64748b; }
+.grupo-cabecera { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 0.6rem; }
+.grupo-cabecera .grupo-titulo { margin: 0; }
+.atenuado { opacity: 0.5; transition: opacity 0.15s; }
 .tarjetas { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin-bottom: 1rem; }
 .tarjeta { background: #fff; border-radius: 10px; padding: 1.1rem 1.25rem; display: flex; flex-direction: column; gap: 0.3rem; }
 .etiqueta { font-size: 0.8rem; color: #64748b; font-weight: 600; }
