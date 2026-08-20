@@ -33,10 +33,11 @@ interface AccionMeta {
   label: string
   shortLabel: string
   value: PurchaseAccionSii
-  // Reclamar (a diferencia de aceptar/acusar recibo) no implica que se
-  // acepte el documento — la compra igual queda registrada (para tener
-  // rastro contable) pero marcada como disputada, no como una deuda
-  // aceptada sin más. Ver registrar-acuse.ts en el server.
+  // Los reclamos van por otro flujo que las aceptaciones: una factura
+  // reclamada NO es una deuda, así que no se registra como compra — se
+  // registra el reclamo ante el SII, se le envía el rechazo comercial al
+  // emisor por correo y el documento sale de la bandeja. Ver
+  // reclamar-incoming-invoice.service.ts en el server.
   disputa: boolean
   icon: string
 }
@@ -67,9 +68,12 @@ const confirmAccion = ref<PurchaseAccionSii | null>(null)
 const confirming = ref(false)
 
 const confirmAccionMeta = computed(() => accionesSii.find((a) => a.value === confirmAccion.value) ?? null)
-const confirmButtonLabel = computed(() =>
-  confirmAccionMeta.value ? `${confirmAccionMeta.value.shortLabel} y registrar compra` : 'Registrar compra'
-)
+const confirmButtonLabel = computed(() => {
+  if (!confirmAccionMeta.value) return 'Registrar compra'
+  return confirmAccionMeta.value.disputa
+    ? 'Reclamar ante el SII'
+    : `${confirmAccionMeta.value.shortLabel} y registrar compra`
+})
 
 function openConfirm(invoice: IncomingInvoice, accion: PurchaseAccionSii | null): void {
   confirmTarget.value = invoice
@@ -84,6 +88,29 @@ async function handleConfirm(): Promise<void> {
 
   confirming.value = true
   try {
+    // Reclamo: flujo aparte — RCD al SII + rechazo comercial al emisor +
+    // fuera de la bandeja, SIN registrar compra (una factura reclamada no
+    // es una deuda).
+    if (confirmAccionMeta.value?.disputa) {
+      const result = await feathersClient.service('reclamar-incoming-invoice').create({
+        incomingInvoiceId: invoice._id,
+        accion: confirmAccion.value as PurchaseAccionSii
+      })
+      incoming.value = incoming.value.filter((i) => i._id !== invoice._id)
+      confirmVisible.value = false
+      if (result.emailEnviado) {
+        toast.add({ severity: 'success', summary: 'Reclamo registrado en el SII y rechazo enviado al emisor', life: 3500 })
+      } else {
+        toast.add({
+          severity: 'warn',
+          summary: 'Reclamo registrado en el SII, pero no se pudo avisar al emisor por correo',
+          detail: result.emailError,
+          life: 6000
+        })
+      }
+      return
+    }
+
     const result = await feathersClient.service('confirm-incoming-invoice').create({
       incomingInvoiceId: invoice._id,
       supplierId: confirmSupplierId.value ?? undefined,
@@ -176,8 +203,9 @@ onMounted(async () => {
     <p class="page-hint">
       Documentos detectados automáticamente en la
       <router-link to="/casilla-intercambio">Casilla de Intercambio</router-link>
-      — elige la acción que corresponde (Aceptar, Reclamar, etc.) o descártalos si no corresponden. Cada acción manda
-      la respuesta al SII y registra la compra en el mismo paso.
+      — elige la acción que corresponde. Aceptar registra la compra y avisa al SII y al emisor; Reclamar registra el
+      reclamo ante el SII y rechaza el documento al emisor <strong>sin</strong> registrarlo como compra. Plazo legal
+      para reclamar: 8 días desde la recepción — después opera la aceptación tácita.
     </p>
 
     <DataTable :value="incoming" :loading="loading" data-key="_id" striped-rows>
@@ -238,11 +266,12 @@ onMounted(async () => {
         </p>
 
         <Message v-if="confirmAccionMeta?.disputa" severity="warn" :closable="false">
-          Vas a reclamar este documento ante el SII — la compra queda registrada como disputada (no aceptada), no
-          como una deuda confirmada.
+          Se registrará el reclamo ante el SII (Ley 19.983), se le enviará el rechazo comercial al correo del
+          emisor y el documento saldrá de la bandeja <strong>sin registrarse como compra</strong> — una factura
+          reclamada no es una deuda. El reclamo es definitivo: el SII no permite revertirlo.
         </Message>
 
-        <label class="field">
+        <label v-if="!confirmAccionMeta?.disputa" class="field">
           <span>Proveedor</span>
           <Select
             v-model="confirmSupplierId"

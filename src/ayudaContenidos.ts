@@ -99,8 +99,9 @@ export const AYUDA_FACTURAS_RECIBIDAS: SeccionAyuda[] = [
   {
     titulo: 'Acciones',
     items: [
-      { nombre: 'Confirmar', descripcion: 'La convierte en una Compra (crea el proveedor si no existe) y le envía al emisor la aceptación comercial y el recibo de mercaderías (Ley 19.983).' },
-      { nombre: 'Descartar', descripcion: 'Solo la quita de la bandeja — NO notifica al SII ni al emisor. Si la factura no corresponde, además debes reclamarla (RCD) dentro de 8 días: hoy, desde la compra o en sii.cl.' }
+      { nombre: 'Aceptar / Acuse recibo', descripcion: 'La convierte en una Compra (crea el proveedor si no existe), informa la aceptación al SII y le envía al emisor la aceptación comercial y el recibo de mercaderías (Ley 19.983).' },
+      { nombre: 'Reclamar (RCD / falta parcial / falta total)', descripcion: 'Registra el reclamo ante el SII, le envía el rechazo comercial al emisor por correo y saca el documento de la bandeja SIN registrarlo como compra — una factura reclamada no es una deuda. Es definitivo y debe hacerse dentro de 8 días desde la recepción en el SII; pasado el plazo, la factura se da por aceptada (aceptación tácita).' },
+      { nombre: 'Descartar', descripcion: 'Solo la quita de la bandeja — NO notifica al SII ni al emisor. Úsalo para duplicados o documentos de prueba; si la factura no corresponde, usa Reclamar.' }
     ]
   }
 ]
