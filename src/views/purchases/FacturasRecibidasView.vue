@@ -180,6 +180,18 @@ const rowMenuItems = computed<MenuItem[]>(() => {
       ? accionesSii.map((a) => ({ label: a.label, icon: `pi ${a.icon}`, command: () => openConfirm(invoice, a.value) }))
       : [{ label: 'Registrar compra', icon: 'pi pi-check', command: () => openConfirm(invoice, null) }]
 
+  if (invoice.tipoDte === 33) {
+    // Con el plazo de reclamo vencido la factura ya quedó aceptada por la
+    // vía tácita y el SII rechaza acuses fuera de plazo — registrar sin
+    // aviso es la única acción que corresponde. Se ofrece siempre (también
+    // sirve si el acuse ya se hizo por otra vía, p. ej. en sii.cl).
+    items.push({
+      label: 'Registrar compra (sin aviso al SII)',
+      icon: 'pi pi-check',
+      command: () => openConfirm(invoice, null)
+    })
+  }
+
   items.push({ label: 'Descartar', icon: 'pi pi-times', command: () => confirmDiscard(invoice) })
   return items
 })
