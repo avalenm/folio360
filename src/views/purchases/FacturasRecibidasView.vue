@@ -189,6 +189,51 @@ function toggleRowMenu(event: Event, invoice: IncomingInvoice): void {
   rowMenu.value?.toggle(event)
 }
 
+// --- Plazo de reclamo (Ley 19.983): 8 días desde la recepción ---
+const PLAZO_RECLAMO_DIAS = 8
+
+function diasRestantesReclamo(invoice: IncomingInvoice): number {
+  const transcurridos = Math.floor((Date.now() - new Date(invoice.recibidoEn).getTime()) / 86_400_000)
+  return PLAZO_RECLAMO_DIAS - transcurridos
+}
+
+function plazoTag(invoice: IncomingInvoice): { severity: string; value: string } {
+  const dias = diasRestantesReclamo(invoice)
+  if (dias <= 0) return { severity: 'secondary', value: 'Plazo vencido — aceptación tácita' }
+  if (dias <= 2) return { severity: 'danger', value: `${dias} día${dias === 1 ? '' : 's'} para reclamar` }
+  if (dias <= 4) return { severity: 'warn', value: `${dias} días para reclamar` }
+  return { severity: 'info', value: `${dias} días para reclamar` }
+}
+
+// --- Sincronización manual del RCV ---
+const syncingRcv = ref(false)
+
+async function buscarEnRcv(): Promise<void> {
+  syncingRcv.value = true
+  try {
+    const result = await feathersClient.service('rcv-sync').create({})
+    await fetchAll()
+    toast.add({
+      severity: result.nuevas > 0 ? 'info' : 'success',
+      summary:
+        result.nuevas > 0
+          ? `${result.nuevas} factura(s) del RCV que no habían llegado por correo`
+          : 'RCV revisado — nada nuevo',
+      detail: `${result.revisados} documento(s) revisados en el registro del SII`,
+      life: 4000
+    })
+  } catch (e) {
+    toast.add({
+      severity: 'error',
+      summary: 'Error al consultar el RCV',
+      detail: e instanceof Error ? e.message : undefined,
+      life: 5000
+    })
+  } finally {
+    syncingRcv.value = false
+  }
+}
+
 onMounted(async () => {
   await Promise.all([fetchAll(), fetchSuppliers()])
 })
@@ -198,6 +243,7 @@ onMounted(async () => {
   <div>
     <div class="page-header">
       <h1 class="page-title">Facturas recibidas <AyudaPagina titulo="Facturas recibidas" :secciones="AYUDA_FACTURAS_RECIBIDAS" /></h1>
+      <Button label="Buscar en el RCV" icon="pi pi-sync" outlined :loading="syncingRcv" @click="buscarEnRcv" />
     </div>
 
     <p class="page-hint">
@@ -228,7 +274,19 @@ onMounted(async () => {
       </Column>
 
       <Column header="Fecha emisión">
-        <template #body="{ data }">{{ new Date(data.fechaEmision).toLocaleDateString('es-CL') }}</template>
+        <template #body="{ data }">
+          <div class="stacked-cell">
+            <span>{{ new Date(data.fechaEmision).toLocaleDateString('es-CL') }}</span>
+            <span v-if="data.origen === 'rcv'" class="muted">Detectada en el RCV</span>
+          </div>
+        </template>
+      </Column>
+
+      <Column header="Plazo de reclamo">
+        <template #body="{ data }">
+          <Tag v-if="data.tipoDte === 33" :severity="plazoTag(data).severity" :value="plazoTag(data).value" />
+          <span v-else class="muted">No aplica</span>
+        </template>
       </Column>
 
       <Column header="Total">

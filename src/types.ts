@@ -453,6 +453,10 @@ export interface IncomingInvoice {
   montoIva: number
   montoExento: number
   montoTotal: number
+  // 'rcv' = detectada en el Registro de Compras del SII (no llegó por
+  // correo); ausente o 'email' = Casilla de Intercambio.
+  origen?: 'email' | 'rcv'
+  // Desde cuándo corre el plazo de 8 días para reclamar (Ley 19.983).
   recibidoEn: string
   createdAt: string
   updatedAt: string
