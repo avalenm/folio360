@@ -105,11 +105,25 @@ export const AYUDA_FACTURAS_RECIBIDAS: SeccionAyuda[] = [
     ]
   },
   {
-    titulo: 'Acciones',
+    titulo: 'Manual del menú ⋮ (facturas tipo 33)',
     items: [
-      { nombre: 'Aceptar / Acuse recibo', descripcion: 'La convierte en una Compra (crea el proveedor si no existe), informa la aceptación al SII y le envía al emisor la aceptación comercial y el recibo de mercaderías (Ley 19.983).' },
-      { nombre: 'Reclamar (RCD / falta parcial / falta total)', descripcion: 'Registra el reclamo ante el SII, le envía el rechazo comercial al emisor por correo y saca el documento de la bandeja SIN registrarlo como compra — una factura reclamada no es una deuda. Es definitivo y debe hacerse dentro de 8 días desde la recepción en el SII; pasado el plazo, la factura se da por aceptada (aceptación tácita).' },
-      { nombre: 'Descartar', descripcion: 'Solo la quita de la bandeja — NO notifica al SII ni al emisor. Úsalo para duplicados o documentos de prueba; si la factura no corresponde, usa Reclamar.' }
+      { nombre: 'Aceptar contenido del documento (ACD)', descripcion: 'Declara al SII que la factura está correcta en montos y datos. Registra la compra, avisa al SII y le envía al emisor la aceptación comercial + recibo de mercaderías (Ley 19.983). Úsala cuando revisaste la factura y está bien.' },
+      { nombre: 'Acuse recibo de mercaderías/servicios (ERM)', descripcion: 'Declara al SII que las mercaderías o servicios se RECIBIERON (el hecho físico, no solo el papel). Mismo efecto práctico que ACD: compra registrada + avisos. Es el acuse que le da a la factura mérito para cesión (factoring del emisor).' },
+      { nombre: 'Reclamar contenido (RCD)', descripcion: 'La factura está mala o no corresponde (montos, datos, no es tuya). Registra el reclamo ante el SII, envía el rechazo al emisor y la saca de la bandeja SIN crear compra. DEFINITIVO: el SII no permite revertirlo — el emisor deberá anularla con NC y re-emitir.' },
+      { nombre: 'Reclamo por falta parcial (RFP) / total (RFT)', descripcion: 'La factura está bien emitida pero la mercadería no llegó completa (RFP) o no llegó nada (RFT). Mismo circuito que RCD: reclamo al SII + rechazo al emisor + fuera de la bandeja, sin compra.' },
+      { nombre: 'Registrar compra (sin aviso al SII)', descripcion: 'Solo registra la compra en tu contabilidad, sin mandar nada al SII. Es la opción correcta cuando el aviso no aplica: plazo de 8 días vencido (aceptación tácita ya operó), factura pagada AL CONTADO (el SII rechaza eventos sobre ellas, código 27), o el acuse ya se hizo por otra vía (sii.cl).' },
+      { nombre: 'Descartar', descripcion: 'Solo la quita de la bandeja — NO notifica al SII ni al emisor ni crea compra. Para duplicados y documentos de prueba. Si la factura no corresponde, lo correcto es Reclamar, no descartar.' }
+    ]
+  },
+  {
+    titulo: '¿Qué opción uso? (guía rápida)',
+    items: [
+      { nombre: 'Factura correcta, dentro de plazo', descripcion: 'Aceptar contenido (o Acuse recibo si quieres dejar constancia de la recepción física).' },
+      { nombre: 'Factura correcta, plazo vencido o pagada al contado', descripcion: 'Registrar compra (sin aviso al SII).' },
+      { nombre: 'Factura incorrecta o que no es tuya, dentro de plazo', descripcion: 'Reclamar contenido (RCD).' },
+      { nombre: 'Factura OK pero mercadería incompleta o ausente', descripcion: 'Reclamo falta parcial (RFP) o total (RFT).' },
+      { nombre: 'Duplicado o prueba', descripcion: 'Descartar.' },
+      { nombre: 'Notas de crédito/débito (61/56) y exentas (34)', descripcion: 'Solo ofrecen "Registrar compra" o "Descartar": el registro de acuse/reclamo del SII únicamente existe para facturas tipo 33.' }
     ]
   }
 ]
