@@ -175,21 +175,24 @@ const rowMenuItems = computed<MenuItem[]>(() => {
   const invoice = menuInvoice.value
   if (!invoice) return []
 
-  const items: MenuItem[] =
-    invoice.tipoDte === 33
-      ? accionesSii.map((a) => ({ label: a.label, icon: `pi ${a.icon}`, command: () => openConfirm(invoice, a.value) }))
-      : [{ label: 'Registrar compra', icon: 'pi pi-check', command: () => openConfirm(invoice, null) }]
-
+  // El menú se adapta al documento: las acciones con aviso al SII solo
+  // existen para facturas tipo 33 Y dentro del plazo de 8 días — vencido el
+  // plazo ya operó la aceptación tácita y el SII rechaza cualquier evento,
+  // así que ofrecerlas solo induciría a error. "Registrar sin aviso" se
+  // ofrece siempre en las 33 (sirve también para las pagadas al contado,
+  // que no admiten eventos, o si el acuse ya se hizo en sii.cl).
+  const items: MenuItem[] = []
   if (invoice.tipoDte === 33) {
-    // Con el plazo de reclamo vencido la factura ya quedó aceptada por la
-    // vía tácita y el SII rechaza acuses fuera de plazo — registrar sin
-    // aviso es la única acción que corresponde. Se ofrece siempre (también
-    // sirve si el acuse ya se hizo por otra vía, p. ej. en sii.cl).
+    if (diasRestantesReclamo(invoice) > 0) {
+      items.push(...accionesSii.map((a) => ({ label: a.label, icon: `pi ${a.icon}`, command: () => openConfirm(invoice, a.value) })))
+    }
     items.push({
       label: 'Registrar compra (sin aviso al SII)',
       icon: 'pi pi-check',
       command: () => openConfirm(invoice, null)
     })
+  } else {
+    items.push({ label: 'Registrar compra', icon: 'pi pi-check', command: () => openConfirm(invoice, null) })
   }
 
   items.push({ label: 'Descartar', icon: 'pi pi-times', command: () => confirmDiscard(invoice) })

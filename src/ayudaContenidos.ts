@@ -123,7 +123,8 @@ export const AYUDA_FACTURAS_RECIBIDAS: SeccionAyuda[] = [
       { nombre: 'Factura incorrecta o que no es tuya, dentro de plazo', descripcion: 'Reclamar contenido (RCD).' },
       { nombre: 'Factura OK pero mercadería incompleta o ausente', descripcion: 'Reclamo falta parcial (RFP) o total (RFT).' },
       { nombre: 'Duplicado o prueba', descripcion: 'Descartar.' },
-      { nombre: 'Notas de crédito/débito (61/56) y exentas (34)', descripcion: 'Solo ofrecen "Registrar compra" o "Descartar": el registro de acuse/reclamo del SII únicamente existe para facturas tipo 33.' }
+      { nombre: 'Notas de crédito/débito (61/56) y exentas (34)', descripcion: 'Solo ofrecen "Registrar compra" o "Descartar": el registro de acuse/reclamo del SII únicamente existe para facturas tipo 33.' },
+      { nombre: 'El menú se adapta solo', descripcion: 'Las acciones con aviso al SII aparecen únicamente en facturas 33 con el plazo vigente — vencidos los 8 días desaparecen (el SII ya no las acepta) y queda "Registrar sin aviso" como la vía correcta.' }
     ]
   }
 ]
