@@ -1207,9 +1207,15 @@ function confirmEmit(): void {
       try {
         await feathersClient.service('emit-document').create({ documentId: document._id })
         invalidarReferenciables()
-    await fetchAll()
+        await fetchAll()
         previewVisible.value = false
         toast.add({ severity: 'success', summary: 'Documento emitido y firmado', life: 3000 })
+        // Emitir y enviar son dos pasos (ver send-document.service.ts): un
+        // documento firmado pero no enviado no es un DTE válido ante el SII y
+        // el cliente no recibe nada. Para que no quede olvidado, se ofrece el
+        // envío enseguida (el usuario prefirió que se pregunte, 2026-08-27).
+        // El botón "Enviar al SII" sigue disponible si acá se responde que no.
+        confirmSend(document, { header: 'Documento firmado — ¿enviar al SII ahora?' })
       } catch (e) {
         toast.add({
           severity: 'error',
@@ -1305,11 +1311,11 @@ function confirmSendSet(): void {
   })
 }
 
-function confirmSend(document: DteDocument): void {
+function confirmSend(document: DteDocument, opciones: { header?: string } = {}): void {
   confirm.require({
     message:
-      'Esto sube el documento firmado al SII (sobre EnvioDTE) — es una acción real, no se puede deshacer. ¿Enviar al SII?',
-    header: 'Confirmar envío al SII',
+      'Esto sube el documento firmado al SII (sobre EnvioDTE) y, si el SII lo recibe, se le envía al cliente por correo (XML + PDF) — es una acción real, no se puede deshacer. ¿Enviar al SII?',
+    header: opciones.header ?? 'Confirmar envío al SII',
     icon: 'pi pi-exclamation-triangle',
     acceptLabel: 'Enviar',
     acceptProps: { severity: 'danger' },
