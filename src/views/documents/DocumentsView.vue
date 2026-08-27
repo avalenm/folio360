@@ -1409,9 +1409,14 @@ const rowMenuItems = computed<MenuItem[]>(() => {
     }
   ]
 
-  if (document.estado !== 'draft') {
-    items.push({ label: 'Descargar PDF', icon: 'pi pi-file-pdf', command: () => downloadPdf(document) })
-  }
+  // Un borrador también tiene PDF: la vista previa con marca de agua, con el
+  // mismo layout que saldrá al SII — para revisar el formato ANTES de emitir
+  // (feedback del usuario, 2026-08-26).
+  items.push({
+    label: document.estado === 'draft' ? 'PDF como irá al SII' : 'Descargar PDF',
+    icon: 'pi pi-file-pdf',
+    command: () => downloadPdf(document)
+  })
 
   if (document.estado === 'draft') {
     items.push({ label: 'Editar', icon: 'pi pi-pencil', command: () => openEdit(document) })
@@ -2521,6 +2526,14 @@ onMounted(async () => {
 
       <template #footer>
         <Button label="Cerrar" text @click="previewVisible = false" />
+        <Button
+          v-if="previewDocument"
+          label="PDF como irá al SII"
+          icon="pi pi-file-pdf"
+          outlined
+          :loading="downloadingPdf"
+          @click="downloadPdf(previewDocument)"
+        />
         <Button
           v-if="previewDocument?.estado === 'draft' && auth.hasMinRole('contador')"
           label="Emitir y firmar"
