@@ -525,7 +525,10 @@ onMounted(async () => {
 .tabla-aging td, .tabla-ranking td, .tabla-ranking th { padding: 0.35rem 0.25rem; border-bottom: 1px solid #f1f4f8; }
 .tabla-ranking th { text-align: left; font-size: 0.78rem; color: #64748b; font-weight: 600; }
 .tabla-ranking tfoot td { border-bottom: none; border-top: 2px solid #e2e8f0; padding-top: 0.5rem; }
-.num { text-align: right; font-variant-numeric: tabular-nums; }
+/* `.tabla-ranking th` (clase + elemento) le gana a `.num` (solo clase): sin esta
+   regla los encabezados numéricos quedaban a la izquierda y las cifras a la
+   derecha, y parecían pertenecer a otra columna. */
+.num, .tabla-ranking th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .sano { color: #15803d; }
 .alerta { color: #b45309; }
 .critico { color: #b91c1c; font-weight: 650; }
