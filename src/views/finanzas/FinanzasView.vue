@@ -426,7 +426,7 @@ onMounted(async () => {
           <table class="tabla-ranking">
             <thead>
               <tr>
-                <th>Documento</th><th>Cliente</th><th class="num">Por cobrar</th><th class="num">IVA</th><th>Mora</th>
+                <th>Documento</th><th>Cliente</th><th class="num">Por cobrar</th><th class="num">IVA</th><th class="num">Mora</th>
               </tr>
             </thead>
             <tbody>
@@ -435,9 +435,8 @@ onMounted(async () => {
                 <td>{{ linea.contraparte }}</td>
                 <td class="num">${{ fm(linea.saldo) }}</td>
                 <td class="num" :class="{ critico: linea.diasVencido > DIAS_PARA_REVISAR_INCOBRABLE }">${{ fm(linea.iva) }}</td>
-                <td class="detalle">
-                  <span v-if="!linea.enterado">del mes en curso</span>
-                  <span v-else-if="linea.diasVencido === 0">al día</span>
+                <td class="detalle num">
+                  <span v-if="!linea.enterado || linea.diasVencido === 0">—</span>
                   <span v-else>{{ linea.diasVencido }} días</span>
                 </td>
               </tr>
