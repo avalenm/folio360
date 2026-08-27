@@ -303,6 +303,7 @@ export interface DteDocument {
   trackId?: string
   envioSiiEstado?: string
   envioSiiGlosa?: string
+  correoReceptor?: { destinatario: string; enviadoAt: string }
   fechaEmision?: string
   createdAt: string
   updatedAt: string

@@ -1687,6 +1687,17 @@ onMounted(async () => {
             :title="`Facturada por el documento tipo ${data.guiaFacturada.tipoDte} folio ${data.guiaFacturada.folio}`"
             class="estado-extra"
           />
+          <!-- Correo al receptor (XML + PDF), que sale tras un envío exitoso
+               al SII: se muestra para no tener que inferirlo. -->
+          <div
+            v-if="data.correoReceptor"
+            class="muted correo-receptor"
+            :title="`XML y PDF enviados por correo a ${data.correoReceptor.destinatario}`"
+          >
+            <i class="pi pi-envelope" />
+            {{ data.correoReceptor.destinatario }} ·
+            {{ new Date(data.correoReceptor.enviadoAt).toLocaleDateString('es-CL') }}
+          </div>
         </template>
       </Column>
 
@@ -2554,6 +2565,14 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+.correo-receptor {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-top: 0.35rem;
+  font-size: 0.78rem;
+}
+
 .page-header {
   display: flex;
   align-items: center;
