@@ -11,6 +11,7 @@ import DatePicker from 'primevue/datepicker'
 import Menu from 'primevue/menu'
 import ToggleSwitch from 'primevue/toggleswitch'
 import Tag from 'primevue/tag'
+import ProgressBar from 'primevue/progressbar'
 import type { MenuItem } from 'primevue/menuitem'
 import { useConfirm } from 'primevue/useconfirm'
 import { useToast } from 'primevue/usetoast'
@@ -827,6 +828,51 @@ function exportacionPayload(): DteExportacion {
   const entries = Object.entries(draft.exportacion).filter(([, value]) => value !== null && value !== '')
   return Object.fromEntries(entries) as unknown as DteExportacion
 }
+
+// --- Ocupación de la hoja ---
+// El SII exige que el documento quepa en UNA hoja impresa, y el guardado lo
+// rechaza si no cabe (documents.service.ts). Para no enterarse recién al
+// guardar, mientras se editan los ítems se le pide al servidor la misma
+// medición (document-hoja) y se muestra como barra: 100 % = ya no entra ni
+// un ítem más. Con retardo, para no medir en cada tecla.
+const hoja = ref<{ cabe: boolean; ocupacion: number; itemFontSize: number } | null>(null)
+let hojaTimer: ReturnType<typeof setTimeout> | undefined
+let hojaSeq = 0
+
+async function medirHoja(): Promise<void> {
+  const seq = (hojaSeq += 1)
+  try {
+    const medida = await feathersClient.service('document-hoja').create({
+      tipoDte: draft.tipoDte,
+      customerId: draft.customerId || undefined,
+      supplierId: draft.supplierId || undefined,
+      descuentoGlobalPct: draft.descuentoGlobalPct || undefined,
+      items: draft.items.map(({ key: _key, ...item }) => item),
+      comisiones: draft.comisiones.map(({ key: _key, ...c }) => c),
+      exportacion: esExportacion.value ? draft.exportacion : undefined,
+      dscRcgGlobales: draft.dscRcgGlobales.map(({ key: _key, ...linea }) => linea),
+      referencias: referenciaDoc.value ? [{ tipoDteRef: referenciaDoc.value.tipoDte, folioRef: referenciaDoc.value.folio }] : []
+    })
+    if (seq === hojaSeq) hoja.value = medida
+  } catch {
+    // Es solo un aviso: si falla la medición no se molesta al usuario, el
+    // guardado igual valida.
+  }
+}
+
+watch(
+  () => [dialogVisible.value, draft.tipoDte, draft.customerId, draft.supplierId, draft.descuentoGlobalPct, JSON.stringify(draft.items), draft.comisiones.length, draft.dscRcgGlobales.length],
+  () => {
+    if (!dialogVisible.value) {
+      hoja.value = null
+      return
+    }
+    clearTimeout(hojaTimer)
+    hojaTimer = setTimeout(() => void medirHoja(), 500)
+  }
+)
+
+const hojaPct = computed(() => (hoja.value ? Math.min(100, Math.round(hoja.value.ocupacion * 100)) : 0))
 
 async function handleSave(): Promise<void> {
   if (!editingId.value && TIPOS_DTE_COMPRA.includes(draft.tipoDte) && !draft.supplierId) {
@@ -2186,6 +2232,18 @@ onMounted(async () => {
           <p v-if="draft.items.length >= MAX_DETALLE_LINES" class="giro-hint">
             <i class="pi pi-info-circle" /> Máximo {{ MAX_DETALLE_LINES }} ítems por documento (límite del SII).
           </p>
+          <div v-if="hoja" class="hoja-ocupacion" :title="'El SII exige que el documento quepa en una sola hoja impresa'">
+            <div class="hoja-ocupacion-texto">
+              <span>Ocupación de la hoja: <strong>{{ hojaPct }} %</strong></span>
+              <span v-if="!hoja.cabe" class="hoja-ocupacion-alerta">
+                <i class="pi pi-exclamation-triangle" /> No cabe en una hoja: quite ítems, acorte descripciones o emita otro documento
+              </span>
+              <span v-else-if="hoja.itemFontSize < 8.5" class="muted">
+                el detalle se imprime con letra reducida ({{ hoja.itemFontSize }} pt)
+              </span>
+            </div>
+            <ProgressBar :value="hojaPct" :show-value="false" :class="{ 'hoja-llena': !hoja.cabe, 'hoja-justa': hoja.cabe && hoja.itemFontSize < 8.5 }" style="height: 6px" />
+          </div>
           <p v-if="sinMontos" class="giro-hint">
             <i class="pi pi-info-circle" />
             <template v-if="TIPOS_DTE_REQUIEREN_TRASLADO.includes(draft.tipoDte)">
@@ -2565,6 +2623,30 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+.hoja-ocupacion {
+  margin: 0.25rem 0 0.75rem;
+}
+
+.hoja-ocupacion-texto {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  font-size: 0.82rem;
+  margin-bottom: 0.3rem;
+}
+
+.hoja-ocupacion-alerta {
+  color: var(--p-red-600);
+}
+
+.hoja-justa :deep(.p-progressbar-value) {
+  background: var(--p-amber-500);
+}
+
+.hoja-llena :deep(.p-progressbar-value) {
+  background: var(--p-red-500);
+}
+
 .correo-receptor {
   display: flex;
   align-items: center;
