@@ -33,6 +33,8 @@ interface Draft {
   smtpPort: number | null
   smtpUsuario: string
   smtpPassword: string
+  remitenteNombre: string
+  remitenteEmail: string
   activo: boolean
 }
 
@@ -48,6 +50,8 @@ function emptyDraft(): Draft {
     smtpPort: null,
     smtpUsuario: '',
     smtpPassword: '',
+    remitenteNombre: '',
+    remitenteEmail: '',
     activo: true
   }
 }
@@ -64,6 +68,8 @@ function draftFromCurrent(config: MailboxConfig): Partial<Draft> {
     smtpPort: config.smtpPort ?? null,
     smtpUsuario: config.smtpUsuario ?? '',
     smtpPassword: '',
+    remitenteNombre: config.remitenteComercial?.nombre ?? '',
+    remitenteEmail: config.remitenteComercial?.email ?? '',
     activo: config.activo
   }
 }
@@ -107,6 +113,10 @@ async function handleSave(): Promise<void> {
       smtpPort: draft.smtpPort ?? undefined,
       smtpUsuario: draft.smtpUsuario || undefined,
       smtpPassword: draft.smtpPassword || undefined,
+      // Remitente comercial: solo si hay correo; el nombre es opcional.
+      remitenteComercial: draft.remitenteEmail.trim()
+        ? { email: draft.remitenteEmail.trim(), nombre: draft.remitenteNombre.trim() || undefined }
+        : undefined,
       activo: draft.activo
     })
     editing.value = false
@@ -173,6 +183,10 @@ onMounted(fetchCurrent)
           <span class="muted">{{ current.imapHost }}:{{ current.imapPort }} ({{ current.imapUsuario }})</span>
           <span v-if="current.smtpHost" class="muted">
             Salida por relay: {{ current.smtpHost }}:{{ current.smtpPort ?? 465 }} ({{ current.smtpUsuario ?? current.imapUsuario }})
+          </span>
+          <span class="muted">
+            Cotizaciones salen desde:
+            {{ current.remitenteComercial ? `${current.remitenteComercial.nombre ? current.remitenteComercial.nombre + ' <' : ''}${current.remitenteComercial.email}${current.remitenteComercial.nombre ? '>' : ''}` : `${current.email} (la casilla)` }}
           </span>
         </div>
         <Tag :severity="current.activo ? 'success' : 'secondary'" :value="current.activo ? 'Activo' : 'Desactivado'" />
@@ -250,6 +264,25 @@ onMounted(fetchCurrent)
             <label class="field field-grow">
               <span>Contraseña SMTP</span>
               <Password v-model="draft.smtpPassword" :feedback="false" toggle-mask />
+            </label>
+          </div>
+        </fieldset>
+
+        <fieldset class="smtp-relay">
+          <legend>Remitente comercial — opcional</legend>
+          <p class="relay-hint">
+            Desde qué dirección salen las cotizaciones y demás correos que no son intercambio de DTE. Así la
+            casilla queda reservada a facturas, acuses y reclamos, y las respuestas de los clientes a una
+            cotización llegan a este otro buzón. Debe ser del dominio verificado en el servidor de salida.
+          </p>
+          <div class="form-row">
+            <label class="field field-grow">
+              <span>Nombre para mostrar</span>
+              <InputText v-model="draft.remitenteNombre" placeholder="Antaris – Ventas" />
+            </label>
+            <label class="field field-grow">
+              <span>Correo</span>
+              <InputText v-model="draft.remitenteEmail" type="email" placeholder="cotizaciones@miempresa.cl" />
             </label>
           </div>
         </fieldset>

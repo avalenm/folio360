@@ -434,6 +434,9 @@ export interface MailboxConfig {
   smtpHost?: string
   smtpPort?: number
   smtpUsuario?: string
+  // Remitente del correo comercial (cotizaciones); la casilla queda solo
+  // para DTE — ver mailbox-config.model.ts en el servidor.
+  remitenteComercial?: { nombre?: string; email: string }
   activo: boolean
   ultimoPolling?: string
   ultimoError?: string
