@@ -765,8 +765,10 @@ const rowMenuItems = computed<MenuItem[]>(() => {
   ]
 })
 
+// La lista paginada NO carga sola al montar (ver useListaPaginada): hay
+// que pedir la primera página explícitamente, igual que hace Documentos.
 onMounted(async () => {
-  await Promise.all([fetchCustomers(), fetchProducts()])
+  await Promise.all([cargar(), fetchCustomers(), fetchProducts()])
 })
 </script>
 
