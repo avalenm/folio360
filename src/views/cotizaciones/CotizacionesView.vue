@@ -892,9 +892,9 @@ onMounted(async () => {
         <div class="item-row item-header">
           <span class="col-producto">Producto</span>
           <span class="col-descripcion">Descripción</span>
-          <span class="col-num">Cant.</span>
-          <span class="col-unidad">Un.</span>
-          <span class="col-num">Precio</span>
+          <span class="col-num">Cantidad</span>
+          <span class="col-unidad">Unidad</span>
+          <span class="col-num">Precio unit.</span>
           <span class="col-num">Descuento</span>
           <span class="col-exento">Exento</span>
           <span class="col-total">Total</span>
@@ -905,7 +905,7 @@ onMounted(async () => {
             <Select :model-value="item.productId ?? null" :options="productOptions" option-label="label" option-value="value" placeholder="Libre" filter show-clear fluid @update:model-value="(v) => applyProduct(item, v as string | null)" />
           </div>
           <div class="col-descripcion">
-            <Textarea v-model="item.descripcion" placeholder="Descripción" auto-resize rows="1" fluid />
+            <Textarea v-model="item.descripcion" placeholder="Descripción" auto-resize rows="1" fluid class="descripcion-input" />
           </div>
           <div class="col-num"><InputNumber v-model="item.cantidad" :min="0" mode="decimal" :max-fraction-digits="2" fluid /></div>
           <div class="col-unidad"><InputText v-model="item.unidad" :maxlength="4" placeholder="Un" fluid /></div>
@@ -1317,21 +1317,42 @@ onMounted(async () => {
 
 /* ---- Ítems del formulario ---- */
 .items-table {
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  overflow: hidden;
   margin-bottom: 0.5rem;
 }
+/* Mismas columnas que Documentos: anchos fijos en rem para los números y
+   `min-width: 0` en cada celda — sin eso, un nombre de producto largo
+   estira su columna y aplasta la descripción a una letra por línea. */
 .item-row {
   display: grid;
-  grid-template-columns: 1.4fr 2.2fr 0.6fr 0.5fr 0.9fr 0.8fr 0.5fr 0.9fr 2.2rem;
-  gap: 0.4rem;
+  grid-template-columns: 1.2fr 1.8fr 5rem 4rem 7rem 6rem 4rem 7rem 2.25rem;
+  gap: 0.6rem;
   align-items: center;
+  padding: 0.5rem 0.85rem;
+  border-bottom: 1px solid #f1f4f8;
+}
+.item-row:last-child {
+  border-bottom: none;
+}
+.item-row > * {
+  min-width: 0;
+  overflow: hidden;
 }
 .item-header {
-  font-size: 0.75rem;
-  font-weight: 600;
+  background: var(--page-bg);
+  border-bottom: 1px solid var(--card-border);
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
   color: var(--text-secondary);
+}
+.descripcion-input {
+  resize: none;
+  line-height: 1.35;
+  font-size: 0.9rem;
 }
 .col-total {
   text-align: right;
