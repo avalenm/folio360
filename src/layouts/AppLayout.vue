@@ -37,6 +37,7 @@ const navGroups: { label: string | null; items: NavItem[] }[] = [
   {
     label: 'Ventas',
     items: [
+      { to: '/cotizaciones', label: 'Cotizaciones', icon: 'pi-file-edit' },
       { to: '/documents', label: 'Documentos', icon: 'pi-file' },
       { to: '/customers', label: 'Clientes', icon: 'pi-users' },
       { to: '/products', label: 'Productos', icon: 'pi-box' },

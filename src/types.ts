@@ -482,3 +482,126 @@ export interface Paginated<T> {
   skip: number
   data: T[]
 }
+
+// ---------------------------------------------------------------------------
+// Cotizaciones — espejo de server/src/models/tenant/cotizacion.model.ts.
+// Las fechas viajan como string en el JSON, igual que el resto.
+// ---------------------------------------------------------------------------
+
+export type CotizacionEstado = 'borrador' | 'enviada' | 'aceptada' | 'rechazada' | 'facturada'
+// 'vencida' la deriva el servidor al leer (enviada con la validez cumplida).
+export type CotizacionEstadoVisible = CotizacionEstado | 'vencida'
+
+export interface CotizacionItem {
+  productId?: string
+  descripcion: string
+  cantidad: number
+  precioUnit: number
+  descuento: number
+  exento: boolean
+  unidad?: string
+}
+
+export interface CotizacionVersion {
+  version: number
+  items: CotizacionItem[]
+  descuentoGlobalPct?: number
+  montos: DteMontos
+  validezDias: number
+  fechaVencimiento: string
+  condiciones?: string
+  notas?: string
+  reemplazadaAt: string
+}
+
+export interface CotizacionFactura {
+  documentId: string
+  tipoDte: number
+  monto: number
+  origen: 'total' | 'items' | 'monto' | 'pie' | 'cuota' | 'interes'
+  itemIndices?: number[]
+  cuotaNumero?: number
+  glosa?: string
+  creadoAt: string
+}
+
+export type MetodoInteres = 'sin_interes' | 'simple' | 'compuesto' | 'cuota_fija'
+export type ModalidadFacturacionCuotas = 'factura_por_cuota' | 'factura_total'
+
+export interface CuotaPago {
+  monto: number
+  fecha: string
+  medio?: string
+  nota?: string
+}
+
+export interface Cuota {
+  numero: number
+  vencimiento: string
+  capital: number
+  interes: number
+  monto: number
+  estado: 'pendiente' | 'pagada'
+  documentId?: string
+  notaDebitoId?: string
+  pagos: CuotaPago[]
+  montoPagado: number
+}
+
+export interface PlanPago {
+  numeroCuotas: number
+  pie?: number
+  primerVencimiento: string
+  periodicidad: 'mensual' | 'dias'
+  cadaDias?: number
+  metodo: MetodoInteres
+  tasaInteresPct: number
+  modalidad: ModalidadFacturacionCuotas
+  cuotas: Cuota[]
+  totalCapital: number
+  totalInteres: number
+  totalPlan: number
+  facturaTotalId?: string
+}
+
+// Lo que el formulario manda para pactar el plan (el servidor calcula el
+// calendario) — ver decidir-cotizacion.service.ts.
+export interface PlanPagoPactado {
+  numeroCuotas: number
+  pie?: number
+  primerVencimiento: string
+  periodicidad: 'mensual' | 'dias'
+  cadaDias?: number
+  metodo: MetodoInteres
+  tasaInteresPct: number
+  modalidad: ModalidadFacturacionCuotas
+}
+
+export interface Cotizacion {
+  _id: string
+  numero: number
+  numeroFormateado: string
+  version: number
+  versiones: CotizacionVersion[]
+  customerId: string
+  giroReceptor?: string
+  titulo?: string
+  items: CotizacionItem[]
+  descuentoGlobalPct?: number
+  montos: DteMontos
+  fechaEmision: string
+  validezDias: number
+  fechaVencimiento: string
+  condiciones?: string
+  notas?: string
+  estado: CotizacionEstado
+  estadoVisible: CotizacionEstadoVisible
+  envios: { destinatario: string; enviadoAt: string; version: number }[]
+  decision?: { fecha: string; motivo?: string }
+  facturas: CotizacionFactura[]
+  montoFacturado: number
+  planPago?: PlanPago
+  ambiente: Ambiente
+  createdAt: string
+  updatedAt: string
+}
