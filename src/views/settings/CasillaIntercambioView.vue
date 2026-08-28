@@ -234,8 +234,8 @@ onMounted(fetchCurrent)
             <InputText v-model="draft.imapUsuario" required />
           </label>
           <label class="field field-grow">
-            <span>Contraseña</span>
-            <Password v-model="draft.password" :feedback="false" toggle-mask required />
+            <span>Contraseña{{ current ? ' (vacío = sin cambios)' : '' }}</span>
+            <Password v-model="draft.password" :feedback="false" toggle-mask :required="!current" />
           </label>
         </div>
 
@@ -262,7 +262,7 @@ onMounted(fetchCurrent)
               <InputText v-model="draft.smtpUsuario" />
             </label>
             <label class="field field-grow">
-              <span>Contraseña SMTP</span>
+              <span>Contraseña SMTP{{ current?.smtpHost ? ' (vacío = sin cambios)' : '' }}</span>
               <Password v-model="draft.smtpPassword" :feedback="false" toggle-mask />
             </label>
           </div>
