@@ -5,6 +5,7 @@ import Column from 'primevue/column'
 import Button from 'primevue/button'
 import Dialog from 'primevue/dialog'
 import InputText from 'primevue/inputtext'
+import Textarea from 'primevue/textarea'
 import InputNumber from 'primevue/inputnumber'
 import Select from 'primevue/select'
 import DatePicker from 'primevue/datepicker'
@@ -275,7 +276,7 @@ const opcionesMoneda = MONEDAS_EXPORTACION.map((moneda) => {
 })
 
 const supplierOptions = computed(() => suppliers.value.map((s) => ({ label: s.razonSocial, value: s._id })))
-const productOptions = computed(() => products.value.map((p) => ({ label: `${p.nombre} (${p.sku})`, value: p._id })))
+const productOptions = computed(() => products.value.map((p) => ({ label: p.sku ? `${p.sku} · ${p.nombre}` : p.nombre, value: p._id })))
 
 function customerOf(id: string | undefined): Customer | undefined {
   return id ? customers.value.find((c) => c._id === id) : undefined
@@ -2289,7 +2290,10 @@ onMounted(async () => {
                 />
               </div>
               <div class="col-descripcion">
-                <InputText v-model="item.descripcion" placeholder="Descripción del ítem" fluid required />
+                <!-- Textarea con auto-ajuste: las descripciones de servicios
+                     suelen ser largas y en un input de una línea quedaban
+                     cortadas, sin poder revisar lo que va a salir en el DTE. -->
+                <Textarea v-model="item.descripcion" placeholder="Descripción del ítem" auto-resize rows="1" fluid required class="descripcion-input" />
               </div>
               <div v-if="esLiquidacion" class="col-num">
                 <Select
@@ -3050,6 +3054,12 @@ onMounted(async () => {
   font-weight: 600;
   color: var(--text-secondary);
   border-bottom: 1px solid var(--border);
+}
+
+.descripcion-input {
+  resize: none;
+  line-height: 1.35;
+  font-size: 0.9rem;
 }
 
 .col-exento {
