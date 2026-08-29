@@ -463,8 +463,20 @@ export interface IncomingInvoice {
   origen?: 'email' | 'rcv'
   // Desde cuándo corre el plazo de 8 días para reclamar (Ley 19.983).
   recibidoEn: string
+  // Referencias del DTE (801 = orden de compra); solo las de correo.
+  referencias?: { tipoDocRef: string; folioRef: string; razonRef?: string }[]
   createdAt: string
   updatedAt: string
+}
+
+// Lo que devuelve sugerir-orden-compra para una factura recibida.
+export interface SugerenciaOrdenCompra {
+  ordenCompraId: string
+  numeroFormateado: string
+  titulo?: string
+  total: number
+  saldoPorFacturar: number
+  estado: OrdenCompraEstado
 }
 
 export interface GiroNegocio {

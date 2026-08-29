@@ -8,6 +8,7 @@ import Button from 'primevue/button'
 import Dialog from 'primevue/dialog'
 import Select from 'primevue/select'
 import Message from 'primevue/message'
+import Checkbox from 'primevue/checkbox'
 import Menu from 'primevue/menu'
 import Tag from 'primevue/tag'
 import type { MenuItem } from 'primevue/menuitem'
@@ -15,7 +16,7 @@ import { useConfirm } from 'primevue/useconfirm'
 import { useToast } from 'primevue/usetoast'
 import { useResource } from '@/composables/useResource'
 import { feathersClient } from '@/services/feathers'
-import type { IncomingInvoice, PurchaseAccionSii, Supplier } from '@/types'
+import type { IncomingInvoice, PurchaseAccionSii, SugerenciaOrdenCompra, Supplier } from '@/types'
 
 const { items: incoming, loading, fetchAll, remove } = useResource<IncomingInvoice>('incoming-invoices')
 const { items: suppliers, fetchAll: fetchSuppliers } = useResource<Supplier>('suppliers')
@@ -75,11 +76,42 @@ const confirmButtonLabel = computed(() => {
     : `${confirmAccionMeta.value.shortLabel} y registrar compra`
 })
 
+// Orden de compra sugerida: si el DTE trae una referencia 801 (u "OC N°…")
+// que calza con una orden abierta del mismo proveedor, se ofrece vincular
+// la compra a esa orden. Es una sugerencia que el usuario acepta o no; el
+// vínculo se hace DESPUÉS de registrar la compra, por facturar-orden-compra,
+// así que no cambia nada de cómo se registra.
+const sugerenciasOc = ref<SugerenciaOrdenCompra[]>([])
+const vincularOcId = ref<string | null>(null)
+const vincularOc = computed({
+  get: () => vincularOcId.value !== null,
+  set: (v: boolean) => {
+    vincularOcId.value = v ? sugerenciasOc.value[0]?.ordenCompraId ?? null : null
+  }
+})
+const sugerenciaElegida = computed(() => sugerenciasOc.value.find((s) => s.ordenCompraId === vincularOcId.value) ?? null)
+
+async function cargarSugerenciasOc(invoice: IncomingInvoice): Promise<void> {
+  sugerenciasOc.value = []
+  vincularOcId.value = null
+  if (!invoice.referencias?.length) return
+  try {
+    const r = await feathersClient.service('sugerir-orden-compra').create({ incomingInvoiceId: invoice._id })
+    // Puede haber cambiado el documento mientras se consultaba.
+    if (confirmTarget.value?._id !== invoice._id) return
+    sugerenciasOc.value = r.sugerencias
+    vincularOcId.value = r.sugerencias[0]?.ordenCompraId ?? null
+  } catch {
+    // Sin sugerencia; el flujo de confirmar sigue igual.
+  }
+}
+
 function openConfirm(invoice: IncomingInvoice, accion: PurchaseAccionSii | null): void {
   confirmTarget.value = invoice
   confirmSupplierId.value = supplierMatch(invoice.emisorRut)?._id ?? null
   confirmAccion.value = accion
   confirmVisible.value = true
+  if (!accionesSii.find((a) => a.value === accion)?.disputa) void cargarSugerenciasOc(invoice)
 }
 
 async function handleConfirm(): Promise<void> {
@@ -118,6 +150,33 @@ async function handleConfirm(): Promise<void> {
     })
     incoming.value = incoming.value.filter((i) => i._id !== invoice._id)
     confirmVisible.value = false
+
+    // La compra ya quedó registrada; el vínculo a la orden es un paso
+    // aparte, y si falla se avisa sin deshacer nada.
+    const sugerencia = sugerenciaElegida.value
+    if (sugerencia) {
+      try {
+        const v = await feathersClient.service('facturar-orden-compra').create({
+          ordenCompraId: sugerencia.ordenCompraId,
+          modo: 'vincular',
+          purchaseId: result.purchaseId,
+          monto: Math.min(invoice.montoTotal, sugerencia.saldoPorFacturar)
+        })
+        toast.add({
+          severity: 'info',
+          summary: `Vinculada a ${sugerencia.numeroFormateado}`,
+          detail: v.estado === 'cerrada' ? 'La orden quedó facturada al 100 % y se cerró.' : undefined,
+          life: 4000
+        })
+      } catch (e) {
+        toast.add({
+          severity: 'warn',
+          summary: `Compra registrada, pero no se pudo vincular a ${sugerencia.numeroFormateado}`,
+          detail: e instanceof Error ? e.message : undefined,
+          life: 6000
+        })
+      }
+    }
 
     if (result.acuseError) {
       toast.add({
@@ -357,6 +416,29 @@ onMounted(async () => {
           />
         </label>
 
+        <Message v-if="!confirmAccionMeta?.disputa && sugerenciasOc.length > 0" severity="info" :closable="false">
+          <div class="sugerencia-oc">
+            <span>
+              La factura referencia la orden de compra
+              <strong>{{ sugerenciasOc[0].numeroFormateado }}</strong><template v-if="sugerenciasOc[0].titulo"> ({{ sugerenciasOc[0].titulo }})</template>,
+              con ${{ sugerenciasOc[0].saldoPorFacturar.toLocaleString('es-CL') }} por facturar.
+            </span>
+            <label class="field-inline">
+              <Checkbox v-model="vincularOc" binary />
+              <span>Vincular la compra a esa orden</span>
+            </label>
+            <label v-if="sugerenciasOc.length > 1" class="field">
+              <span>Orden</span>
+              <Select
+                v-model="vincularOcId"
+                :options="sugerenciasOc.map((s) => ({ label: `${s.numeroFormateado}${s.titulo ? ` — ${s.titulo}` : ''}`, value: s.ordenCompraId }))"
+                option-label="label"
+                option-value="value"
+              />
+            </label>
+          </div>
+        </Message>
+
         <div class="form-actions">
           <Button label="Cancelar" text @click="confirmVisible = false" />
           <Button
@@ -429,5 +511,15 @@ onMounted(async () => {
   justify-content: flex-end;
   gap: 0.5rem;
   margin-top: 0.5rem;
+}
+.sugerencia-oc {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.field-inline {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 </style>
