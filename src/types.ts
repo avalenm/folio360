@@ -608,3 +608,79 @@ export interface Cotizacion {
   createdAt: string
   updatedAt: string
 }
+
+// ---------------------------------------------------------------------------
+// Órdenes de compra — espejo de server/src/models/tenant/orden-compra.model.ts.
+// ---------------------------------------------------------------------------
+
+export type OrdenCompraEstado = 'borrador' | 'enviada' | 'recibida_parcial' | 'recibida' | 'cerrada' | 'anulada'
+// 'atrasada' la deriva el servidor al leer (enviada o parcial con la fecha de
+// entrega pasada).
+export type OrdenCompraEstadoVisible = OrdenCompraEstado | 'atrasada'
+
+export interface OrdenCompraItem {
+  productId?: string
+  descripcion: string
+  cantidad: number
+  precioUnit: number
+  descuento: number
+  exento: boolean
+  unidad?: string
+  cantidadRecibida: number
+}
+
+export interface OrdenCompraVersion {
+  version: number
+  items: OrdenCompraItem[]
+  descuentoGlobalPct?: number
+  montos: DteMontos
+  fechaEntrega?: string
+  lugarEntrega?: string
+  condicionesPago?: string
+  reemplazadaAt: string
+}
+
+export interface OrdenCompraRecepcion {
+  fecha: string
+  items: { indice: number; cantidad: number }[]
+  guiaFolio?: string
+  nota?: string
+  registradaAt: string
+}
+
+export interface OrdenCompraFactura {
+  purchaseId: string
+  tipoDocumento: string
+  folio: string
+  monto: number
+  creadoAt: string
+}
+
+export interface OrdenCompra {
+  _id: string
+  numero: number
+  numeroFormateado: string
+  version: number
+  versiones: OrdenCompraVersion[]
+  supplierId: string
+  titulo?: string
+  items: OrdenCompraItem[]
+  descuentoGlobalPct?: number
+  montos: DteMontos
+  fechaEmision: string
+  fechaEntrega?: string
+  lugarEntrega?: string
+  condicionesPago?: string
+  notas?: string
+  estado: OrdenCompraEstado
+  estadoVisible: OrdenCompraEstadoVisible
+  envios: { destinatario: string; enviadoAt: string; version: number }[]
+  recepciones: OrdenCompraRecepcion[]
+  facturas: OrdenCompraFactura[]
+  montoFacturado: number
+  saldoPorFacturar: number
+  cierre?: { fecha: string; motivo?: string }
+  ambiente: Ambiente
+  createdAt: string
+  updatedAt: string
+}

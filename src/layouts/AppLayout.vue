@@ -47,6 +47,7 @@ const navGroups: { label: string | null; items: NavItem[] }[] = [
   {
     label: 'Compras',
     items: [
+      { to: '/ordenes-compra', label: 'Órdenes de compra', icon: 'pi-clipboard', minRole: 'contador' },
       { to: '/purchases', label: 'Compras', icon: 'pi-shopping-cart', minRole: 'contador' },
       { to: '/facturas-recibidas', label: 'Facturas recibidas', icon: 'pi-inbox', minRole: 'contador' },
       { to: '/suppliers', label: 'Proveedores', icon: 'pi-truck' }

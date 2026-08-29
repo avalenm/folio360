@@ -50,6 +50,12 @@ const router = createRouter({
           meta: { minRole: 'contador' }
         },
         {
+          path: 'ordenes-compra',
+          name: 'ordenes-compra',
+          component: () => import('@/views/ordenes-compra/OrdenesCompraView.vue'),
+          meta: { minRole: 'contador' }
+        },
+        {
           path: 'facturas-recibidas',
           name: 'facturas-recibidas',
           component: () => import('@/views/purchases/FacturasRecibidasView.vue'),
