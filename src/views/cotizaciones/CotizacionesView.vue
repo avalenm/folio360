@@ -228,7 +228,14 @@ async function applyProduct(item: ItemDraft, productId: string | null): Promise<
 function addItem(): void {
   draft.items.push(blankItem())
 }
+// Con un solo ítem el botón no lo quita (hace falta al menos una línea) sino
+// que lo deja en blanco: antes quedaba deshabilitado y parecía que no
+// funcionaba.
 function removeItem(key: number): void {
+  if (draft.items.length === 1) {
+    draft.items = [blankItem()]
+    return
+  }
   draft.items = draft.items.filter((i) => i.key !== key)
 }
 
@@ -916,7 +923,7 @@ onMounted(async () => {
           <div class="col-exento"><ToggleSwitch v-model="item.exento" /></div>
           <div class="col-total">${{ formatMoney(montoItem(item)) }}</div>
           <div class="col-remove">
-            <Button icon="pi pi-times" text severity="secondary" :disabled="draft.items.length === 1" title="Quitar ítem" @click="removeItem(item.key)" />
+            <Button icon="pi pi-times" text severity="secondary" type="button" :title="draft.items.length === 1 ? 'Vaciar ítem' : 'Quitar ítem'" @click="removeItem(item.key)" />
           </div>
         </div>
       </div>

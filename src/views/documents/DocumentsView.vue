@@ -528,27 +528,37 @@ async function applyProduct(item: ItemDraft, productId: string | null): Promise<
   const product = productId ? products.value.find((p) => p._id === productId) : undefined
   if (!product) return
 
-  // Una Factura No Afecta o Exenta (34) fuerza todos sus ítems a exento,
-  // sin importar cómo esté catalogado el producto — ver validación en
-  // documents.service.ts.
-  item.exento = draft.tipoDte === 34 ? true : product.exento
+  try {
+    await rellenarDesdeProducto(item, product)
+  } catch (e) {
+    toast.add({
+      severity: 'error',
+      summary: 'No se pudo obtener el valor de la UF',
+      detail: e instanceof Error ? e.message : undefined,
+      life: 5000
+    })
+    item.descripcion = product.nombre
+    item.precioUnit = 0
+  }
+}
+
+// Rellena un ítem con un producto del catálogo. Lo comparten el selector de
+// la fila (applyProduct) y la selección masiva. Si el producto va en UF y no
+// se consigue el valor del día, lanza: quien llama decide qué hacer (la fila
+// avisa y deja el precio en 0; la selección masiva no agrega nada).
+async function rellenarDesdeProducto(item: ItemDraft, product: Product): Promise<void> {
+  item.productId = product._id
+
+  // Una Factura No Afecta o Exenta (34) y los DTE de exportación fuerzan
+  // todos sus ítems a exento, sin importar cómo esté catalogado el producto
+  // — ver validación en documents.service.ts.
+  item.exento = draft.tipoDte === 34 || esExportacion.value ? true : product.exento
   item.unidad = product.unidad
 
   if (product.moneda === 'UF') {
-    try {
-      const uf = await ensureValorUf()
-      item.precioUnit = Math.round(product.precio * uf.valor)
-      item.descripcion = `${product.nombre} (${formatUf(product.precio)} UF a $${formatUf(uf.valor)})`
-    } catch (e) {
-      toast.add({
-        severity: 'error',
-        summary: 'No se pudo obtener el valor de la UF',
-        detail: e instanceof Error ? e.message : undefined,
-        life: 5000
-      })
-      item.descripcion = product.nombre
-      item.precioUnit = 0
-    }
+    const uf = await ensureValorUf()
+    item.precioUnit = Math.round(product.precio * uf.valor)
+    item.descripcion = `${product.nombre} (${formatUf(product.precio)} UF a $${formatUf(uf.valor)})`
     return
   }
 
@@ -802,7 +812,14 @@ function addItem(): void {
   draft.items.push(blankItem(draft.tipoDte === 34 || esExportacion.value))
 }
 
+// Con un solo ítem el botón no lo quita (el documento necesita al menos una
+// línea) sino que lo deja en blanco: antes quedaba deshabilitado y parecía
+// que no funcionaba.
 function removeItem(key: number): void {
+  if (draft.items.length === 1) {
+    draft.items = [blankItem(draft.tipoDte === 34 || esExportacion.value)]
+    return
+  }
   draft.items = draft.items.filter((item) => item.key !== key)
 }
 
@@ -836,24 +853,37 @@ function exportacionPayload(): DteExportacion {
 // guardar, mientras se editan los ítems se le pide al servidor la misma
 // medición (document-hoja) y se muestra como barra: 100 % = ya no entra ni
 // un ítem más. Con retardo, para no medir en cada tecla.
-const hoja = ref<{ cabe: boolean; ocupacion: number; itemFontSize: number } | null>(null)
+const hoja = ref<MedidaHoja | null>(null)
 let hojaTimer: ReturnType<typeof setTimeout> | undefined
 let hojaSeq = 0
+
+interface MedidaHoja {
+  cabe: boolean
+  ocupacion: number
+  itemFontSize: number
+}
+
+// Mide el documento tal como está el borrador pero con el detalle que se
+// indique: la barra de ocupación mide los ítems actuales y la selección
+// masiva mide "los actuales más los que se van a agregar".
+async function medirDocumento(items: ItemDraft[]): Promise<MedidaHoja> {
+  return (await feathersClient.service('document-hoja').create({
+    tipoDte: draft.tipoDte,
+    customerId: draft.customerId || undefined,
+    supplierId: draft.supplierId || undefined,
+    descuentoGlobalPct: draft.descuentoGlobalPct || undefined,
+    items: items.map(({ key: _key, ...item }) => item),
+    comisiones: draft.comisiones.map(({ key: _key, ...c }) => c),
+    exportacion: esExportacion.value ? draft.exportacion : undefined,
+    dscRcgGlobales: draft.dscRcgGlobales.map(({ key: _key, ...linea }) => linea),
+    referencias: referenciaDoc.value ? [{ tipoDteRef: referenciaDoc.value.tipoDte, folioRef: referenciaDoc.value.folio }] : []
+  })) as MedidaHoja
+}
 
 async function medirHoja(): Promise<void> {
   const seq = (hojaSeq += 1)
   try {
-    const medida = await feathersClient.service('document-hoja').create({
-      tipoDte: draft.tipoDte,
-      customerId: draft.customerId || undefined,
-      supplierId: draft.supplierId || undefined,
-      descuentoGlobalPct: draft.descuentoGlobalPct || undefined,
-      items: draft.items.map(({ key: _key, ...item }) => item),
-      comisiones: draft.comisiones.map(({ key: _key, ...c }) => c),
-      exportacion: esExportacion.value ? draft.exportacion : undefined,
-      dscRcgGlobales: draft.dscRcgGlobales.map(({ key: _key, ...linea }) => linea),
-      referencias: referenciaDoc.value ? [{ tipoDteRef: referenciaDoc.value.tipoDte, folioRef: referenciaDoc.value.folio }] : []
-    })
+    const medida = await medirDocumento(draft.items)
     if (seq === hojaSeq) hoja.value = medida
   } catch {
     // Es solo un aviso: si falla la medición no se molesta al usuario, el
@@ -874,6 +904,118 @@ watch(
 )
 
 const hojaPct = computed(() => (hoja.value ? Math.min(100, Math.round(hoja.value.ocupacion * 100)) : 0))
+
+// --- Agregar varios productos del catálogo de una vez ---
+// Un diálogo con el catálogo completo para marcar varios productos, en vez de
+// agregar ítem por ítem. Antes de agregarlos se comprueba que el documento
+// siga cabiendo: el tope de líneas del SII (MAX_DETALLE_LINES) y la hoja
+// única impresa — la misma medición que la barra de ocupación, pero hecha
+// con los productos marcados incluidos, para avisar ANTES de agregarlos.
+const catalogoVisible = ref(false)
+const catalogoFiltro = ref('')
+const catalogoSeleccion = ref<Product[]>([])
+const catalogoAgregando = ref(false)
+// Medición del documento con los productos marcados incluidos; null mientras
+// se calcula, si no hay nada marcado o si la medición falló.
+const catalogoHoja = ref<MedidaHoja | null>(null)
+let catalogoTimer: ReturnType<typeof setTimeout> | undefined
+let catalogoSeq = 0
+
+const catalogoProductos = computed(() => {
+  const texto = catalogoFiltro.value.trim().toLowerCase()
+  const lista = [...products.value].sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'))
+  if (!texto) return lista
+  return lista.filter((p) => p.nombre.toLowerCase().includes(texto) || (p.sku ?? '').toLowerCase().includes(texto))
+})
+
+// Las filas en blanco (la que trae el formulario al abrirse, o una agregada y
+// nunca llenada) se reemplazan por los productos elegidos en vez de quedar
+// vacías en medio del detalle.
+function esItemVacio(item: ItemDraft): boolean {
+  return !item.productId && !item.descripcion.trim() && !item.precioUnit
+}
+const itemsConDatos = computed(() => draft.items.filter((item) => !esItemVacio(item)))
+const catalogoCupos = computed(() => Math.max(0, MAX_DETALLE_LINES - itemsConDatos.value.length))
+const catalogoExcedeCupos = computed(() => catalogoSeleccion.value.length > catalogoCupos.value)
+const catalogoHojaPct = computed(() => (catalogoHoja.value ? Math.min(100, Math.round(catalogoHoja.value.ocupacion * 100)) : 0))
+const catalogoPuedeAgregar = computed(
+  () => catalogoSeleccion.value.length > 0 && !catalogoExcedeCupos.value && !(catalogoHoja.value && !catalogoHoja.value.cabe)
+)
+
+function openCatalogo(): void {
+  catalogoFiltro.value = ''
+  catalogoSeleccion.value = []
+  catalogoHoja.value = null
+  catalogoVisible.value = true
+}
+
+async function itemsDesdeProductos(seleccion: Product[]): Promise<ItemDraft[]> {
+  const nuevos: ItemDraft[] = []
+  for (const product of seleccion) {
+    const item = blankItem(draft.tipoDte === 34 || esExportacion.value)
+    await rellenarDesdeProducto(item, product)
+    nuevos.push(item)
+  }
+  return nuevos
+}
+
+async function medirCatalogo(): Promise<void> {
+  const seq = (catalogoSeq += 1)
+  if (catalogoSeleccion.value.length === 0 || catalogoExcedeCupos.value) {
+    catalogoHoja.value = null
+    return
+  }
+  try {
+    const nuevos = await itemsDesdeProductos(catalogoSeleccion.value)
+    const medida = await medirDocumento([...itemsConDatos.value, ...nuevos])
+    if (seq === catalogoSeq) catalogoHoja.value = medida
+  } catch {
+    if (seq === catalogoSeq) catalogoHoja.value = null
+  }
+}
+
+watch(catalogoSeleccion, () => {
+  clearTimeout(catalogoTimer)
+  catalogoHoja.value = null
+  catalogoTimer = setTimeout(() => void medirCatalogo(), 400)
+})
+
+async function agregarSeleccion(): Promise<void> {
+  if (!catalogoPuedeAgregar.value) return
+  catalogoAgregando.value = true
+  try {
+    const nuevos = await itemsDesdeProductos(catalogoSeleccion.value)
+    const items = [...itemsConDatos.value, ...nuevos]
+
+    // Se vuelve a medir justo antes de agregar: la medición de la vista va
+    // con retardo y el usuario pudo marcar algo más en el último medio
+    // segundo. Si la medición falla se agrega igual: el guardado valida.
+    let medida: MedidaHoja | null = null
+    try {
+      medida = await medirDocumento(items)
+    } catch {
+      medida = null
+    }
+    if (medida && !medida.cabe) {
+      catalogoHoja.value = medida
+      return
+    }
+
+    draft.items = items
+    catalogoVisible.value = false
+  } catch (e) {
+    // Lo único que puede fallar acá es la UF del día (productos tarifados en
+    // UF): no se agrega nada a medias.
+    toast.add({
+      severity: 'error',
+      summary: 'No se pudieron agregar los productos',
+      detail: e instanceof Error ? e.message : 'No se pudo obtener el valor de la UF',
+      life: 5000
+    })
+  } finally {
+    catalogoAgregando.value = false
+  }
+}
 
 async function handleSave(): Promise<void> {
   if (!editingId.value && TIPOS_DTE_COMPRA.includes(draft.tipoDte) && !draft.supplierId) {
@@ -2221,14 +2363,27 @@ onMounted(async () => {
         <section class="doc-section">
           <div class="section-header-row">
             <h3 class="section-title">Ítems</h3>
-            <Button
-              label="Agregar ítem"
-              icon="pi pi-plus"
-              text
-              size="small"
-              :disabled="draft.items.length >= MAX_DETALLE_LINES"
-              @click="addItem"
-            />
+            <div class="items-acciones">
+              <Button
+                label="Desde el catálogo"
+                icon="pi pi-list-check"
+                text
+                size="small"
+                type="button"
+                :disabled="itemsConDatos.length >= MAX_DETALLE_LINES || products.length === 0"
+                title="Elegir varios productos del catálogo de una vez"
+                @click="openCatalogo"
+              />
+              <Button
+                label="Agregar ítem"
+                icon="pi pi-plus"
+                text
+                size="small"
+                type="button"
+                :disabled="draft.items.length >= MAX_DETALLE_LINES"
+                @click="addItem"
+              />
+            </div>
           </div>
           <p v-if="draft.items.length >= MAX_DETALLE_LINES" class="giro-hint">
             <i class="pi pi-info-circle" /> Máximo {{ MAX_DETALLE_LINES }} ítems por documento (límite del SII).
@@ -2347,8 +2502,8 @@ onMounted(async () => {
                   icon="pi pi-times"
                   text
                   severity="secondary"
-                  :disabled="draft.items.length === 1"
-                  title="Quitar ítem"
+                  type="button"
+                  :title="draft.items.length === 1 ? 'Vaciar ítem' : 'Quitar ítem'"
                   @click="removeItem(item.key)"
                 />
               </div>
@@ -2403,6 +2558,75 @@ onMounted(async () => {
           <Button type="submit" label="Guardar" :loading="saving" />
         </div>
       </form>
+    </Dialog>
+
+    <Dialog v-model:visible="catalogoVisible" modal header="Agregar productos del catálogo" :style="{ width: 'min(820px, 96vw)' }">
+      <div class="catalogo-body">
+        <InputText v-model="catalogoFiltro" placeholder="Buscar por nombre o SKU" fluid autofocus />
+        <DataTable
+          v-model:selection="catalogoSeleccion"
+          :value="catalogoProductos"
+          data-key="_id"
+          scrollable
+          scroll-height="50vh"
+          striped-rows
+          size="small"
+        >
+          <Column selection-mode="multiple" header-style="width: 3rem" />
+          <Column header="Producto">
+            <template #body="{ data }">
+              <div class="catalogo-producto">
+                <strong>{{ data.nombre }}</strong>
+                <span v-if="data.sku" class="muted">{{ data.sku }}</span>
+              </div>
+            </template>
+          </Column>
+          <Column header="Precio" header-style="width: 9rem">
+            <template #body="{ data }">
+              {{ data.moneda === 'UF' ? `${formatUf(data.precio)} UF` : `$${formatMoney(data.precio)}` }}
+            </template>
+          </Column>
+          <Column field="unidad" header="Unidad" header-style="width: 6rem" />
+          <Column header="Exento" header-style="width: 6rem">
+            <template #body="{ data }">{{ data.exento ? 'Sí' : 'No' }}</template>
+          </Column>
+          <template #empty>Sin productos que coincidan con la búsqueda.</template>
+        </DataTable>
+
+        <!-- El estado de abajo es lo que decide si se puede agregar: primero
+             el tope de líneas del SII, después que quepa en la hoja. -->
+        <p v-if="catalogoExcedeCupos" class="catalogo-estado catalogo-alerta">
+          <i class="pi pi-exclamation-triangle" />
+          Marcaste {{ catalogoSeleccion.length }} productos y solo quedan {{ catalogoCupos }} líneas: el SII admite
+          {{ MAX_DETALLE_LINES }} ítems por documento.
+        </p>
+        <p v-else-if="catalogoHoja && !catalogoHoja.cabe" class="catalogo-estado catalogo-alerta">
+          <i class="pi pi-exclamation-triangle" />
+          Con estos {{ catalogoSeleccion.length }} productos el documento no cabe en una hoja ({{ catalogoHojaPct }} %):
+          marca menos o emite otro documento.
+        </p>
+        <p v-else-if="catalogoHoja" class="catalogo-estado">
+          <i class="pi pi-check-circle" /> {{ catalogoSeleccion.length }} marcados · ocupación estimada de la hoja:
+          <strong>{{ catalogoHojaPct }} %</strong>
+        </p>
+        <p v-else-if="catalogoSeleccion.length" class="catalogo-estado muted">
+          <i class="pi pi-spin pi-spinner" /> Midiendo si cabe en la hoja…
+        </p>
+        <p v-else class="catalogo-estado muted">
+          Quedan {{ catalogoCupos }} líneas disponibles en el documento.
+        </p>
+      </div>
+
+      <template #footer>
+        <Button label="Cancelar" text @click="catalogoVisible = false" />
+        <Button
+          :label="catalogoSeleccion.length > 1 ? `Agregar ${catalogoSeleccion.length} productos` : 'Agregar producto'"
+          icon="pi pi-plus"
+          :disabled="!catalogoPuedeAgregar"
+          :loading="catalogoAgregando"
+          @click="agregarSeleccion"
+        />
+      </template>
     </Dialog>
 
     <Dialog v-model:visible="pagoVisible" modal header="Pagos del documento" style="width: 560px">
@@ -2720,6 +2944,37 @@ onMounted(async () => {
   font-size: 0.78rem;
   color: var(--text-secondary);
   font-weight: 400;
+}
+
+/* ---------- Diálogo del catálogo (selección masiva) ---------- */
+.items-acciones {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.catalogo-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.catalogo-producto {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.catalogo-estado {
+  margin: 0;
+  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.catalogo-alerta {
+  color: var(--p-red-600, #dc2626);
 }
 
 /* ---------- Diálogo de pagos ---------- */
