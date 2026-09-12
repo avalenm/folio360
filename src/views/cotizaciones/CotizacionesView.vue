@@ -207,22 +207,78 @@ async function applyProduct(item: ItemDraft, productId: string | null): Promise<
   item.productId = productId ?? undefined
   const product = productId ? products.value.find((p) => p._id === productId) : undefined
   if (!product) return
+  try {
+    await rellenarDesdeProducto(item, product)
+  } catch (e) {
+    avisarError('No se pudo obtener el valor de la UF', e)
+    item.descripcion = product.nombre
+    item.precioUnit = 0
+  }
+}
+
+// Rellena un ítem con un producto del catálogo. Lo comparten el selector de
+// la fila (applyProduct) y la selección masiva. Si el producto va en UF y no
+// se consigue el valor del día, lanza: quien llama decide qué hacer.
+async function rellenarDesdeProducto(item: ItemDraft, product: Product): Promise<void> {
+  item.productId = product._id
   item.exento = product.exento
   item.unidad = product.unidad
   if (product.moneda === 'UF') {
-    try {
-      const uf = await ensureValorUf()
-      item.precioUnit = Math.round(product.precio * uf.valor)
-      item.descripcion = `${product.nombre} (${formatUf(product.precio)} UF a $${formatUf(uf.valor)})`
-    } catch (e) {
-      avisarError('No se pudo obtener el valor de la UF', e)
-      item.descripcion = product.nombre
-      item.precioUnit = 0
-    }
+    const uf = await ensureValorUf()
+    item.precioUnit = Math.round(product.precio * uf.valor)
+    item.descripcion = `${product.nombre} (${formatUf(product.precio)} UF a $${formatUf(uf.valor)})`
     return
   }
   item.descripcion = product.nombre
   item.precioUnit = product.precio
+}
+
+// --- Agregar varios productos del catálogo de una vez ---
+// Igual que en Documentos, pero sin tope de líneas ni medición de hoja: la
+// cotización no es un DTE, y al facturarla por ítems ya se parte en varios
+// borradores si no cabe en una hoja.
+const catalogoVisible = ref(false)
+const catalogoFiltro = ref('')
+const catalogoSeleccion = ref<Product[]>([])
+const catalogoAgregando = ref(false)
+
+const catalogoProductos = computed(() => {
+  const texto = catalogoFiltro.value.trim().toLowerCase()
+  const lista = [...products.value].sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'))
+  if (!texto) return lista
+  return lista.filter((p) => p.nombre.toLowerCase().includes(texto) || (p.sku ?? '').toLowerCase().includes(texto))
+})
+
+// Las filas en blanco (la que trae el formulario al abrirse, o una agregada y
+// nunca llenada) se reemplazan por los productos elegidos.
+function esItemVacio(item: ItemDraft): boolean {
+  return !item.productId && !item.descripcion.trim() && !item.precioUnit
+}
+
+function openCatalogo(): void {
+  catalogoFiltro.value = ''
+  catalogoSeleccion.value = []
+  catalogoVisible.value = true
+}
+
+async function agregarSeleccion(): Promise<void> {
+  if (catalogoSeleccion.value.length === 0) return
+  catalogoAgregando.value = true
+  try {
+    const nuevos: ItemDraft[] = []
+    for (const product of catalogoSeleccion.value) {
+      const item = blankItem()
+      await rellenarDesdeProducto(item, product)
+      nuevos.push(item)
+    }
+    draft.items = [...draft.items.filter((item) => !esItemVacio(item)), ...nuevos]
+    catalogoVisible.value = false
+  } catch (e) {
+    // Lo único que puede fallar es la UF del día: no se agrega nada a medias.
+    avisarError('No se pudieron agregar los productos', e)
+  } finally {
+    catalogoAgregando.value = false
+  }
 }
 
 function addItem(): void {
@@ -896,7 +952,19 @@ onMounted(async () => {
         </label>
       </div>
 
-      <h3 class="section-title">Ítems</h3>
+      <div class="items-cabecera">
+        <h3 class="section-title">Ítems</h3>
+        <Button
+          label="Desde el catálogo"
+          icon="pi pi-list-check"
+          text
+          size="small"
+          type="button"
+          :disabled="products.length === 0"
+          title="Elegir varios productos del catálogo de una vez"
+          @click="openCatalogo"
+        />
+      </div>
       <div class="items-table">
         <div class="item-row item-header">
           <span class="col-producto">Producto</span>
@@ -927,7 +995,7 @@ onMounted(async () => {
           </div>
         </div>
       </div>
-      <Button label="Agregar ítem" icon="pi pi-plus" text size="small" @click="addItem" />
+      <Button label="Agregar ítem" icon="pi pi-plus" text size="small" type="button" @click="addItem" />
       <p v-if="valorUf" class="muted" style="margin-top: 0.5rem">
         <i class="pi pi-info-circle" /> UF de hoy: ${{ formatUf(valorUf.valor) }} — los productos en UF se convierten a pesos al agregarlos.
       </p>
@@ -962,6 +1030,56 @@ onMounted(async () => {
     </Dialog>
 
     <!-- ================= Detalle ================= -->
+    <!-- ================= Agregar productos del catálogo ================= -->
+    <Dialog v-model:visible="catalogoVisible" modal header="Agregar productos del catálogo" style="width: min(820px, 96vw)">
+      <div class="catalogo-body">
+        <InputText v-model="catalogoFiltro" placeholder="Buscar por nombre o SKU" fluid autofocus />
+        <DataTable
+          v-model:selection="catalogoSeleccion"
+          :value="catalogoProductos"
+          data-key="_id"
+          scrollable
+          scroll-height="50vh"
+          striped-rows
+          size="small"
+        >
+          <Column selection-mode="multiple" header-style="width: 3rem" />
+          <Column header="Producto">
+            <template #body="{ data }">
+              <div class="catalogo-producto">
+                <strong>{{ data.nombre }}</strong>
+                <span v-if="data.sku" class="muted">{{ data.sku }}</span>
+              </div>
+            </template>
+          </Column>
+          <Column header="Precio" header-style="width: 9rem">
+            <template #body="{ data }">
+              {{ data.moneda === 'UF' ? `${formatUf(data.precio)} UF` : `$${formatMoney(data.precio)}` }}
+            </template>
+          </Column>
+          <Column field="unidad" header="Unidad" header-style="width: 6rem" />
+          <Column header="Exento" header-style="width: 6rem">
+            <template #body="{ data }">{{ data.exento ? 'Sí' : 'No' }}</template>
+          </Column>
+          <template #empty>Sin productos que coincidan con la búsqueda.</template>
+        </DataTable>
+        <p class="muted" style="margin: 0">
+          <template v-if="catalogoSeleccion.length">{{ catalogoSeleccion.length }} marcados.</template>
+          <template v-else>Marca los productos que quieres agregar a la cotización.</template>
+        </p>
+      </div>
+      <template #footer>
+        <Button label="Cancelar" text @click="catalogoVisible = false" />
+        <Button
+          :label="catalogoSeleccion.length > 1 ? `Agregar ${catalogoSeleccion.length} productos` : 'Agregar producto'"
+          icon="pi pi-plus"
+          :disabled="catalogoSeleccion.length === 0"
+          :loading="catalogoAgregando"
+          @click="agregarSeleccion"
+        />
+      </template>
+    </Dialog>
+
     <Dialog v-model:visible="detalleVisible" modal :header="detalle ? `${detalle.numeroFormateado} · versión ${detalle.version}` : ''" style="width: min(1000px, 96vw)">
       <div v-if="detalle" class="detalle">
         <div class="detalle-head">
@@ -1322,6 +1440,30 @@ onMounted(async () => {
 }
 .col-right {
   text-align: right;
+}
+
+/* ---- Diálogo del catálogo (selección masiva) ---- */
+.items-cabecera {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 1.25rem 0 0.5rem;
+}
+
+.items-cabecera .section-title {
+  margin: 0;
+}
+
+.catalogo-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.catalogo-producto {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
 }
 
 /* ---- Ítems del formulario ---- */
