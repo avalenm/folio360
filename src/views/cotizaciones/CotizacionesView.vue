@@ -25,6 +25,7 @@ import { descargarPdf } from '@/pdf'
 import type {
   Cotizacion,
   CotizacionItem,
+  CotizacionVersion,
   Customer,
   Cuota,
   DteDocument,
@@ -390,7 +391,10 @@ async function handleSave(): Promise<void> {
 
 function confirmDelete(c: Cotizacion): void {
   confirm.require({
-    message: `¿Eliminar la cotización ${c.numeroFormateado}?`,
+    message:
+      c.envios.length > 0
+        ? `¿Eliminar la cotización ${c.numeroFormateado}? El cliente ya la recibió por correo; si prefieres dejar constancia, márcala rechazada en vez de eliminarla.`
+        : `¿Eliminar la cotización ${c.numeroFormateado}?`,
     header: 'Confirmar',
     icon: 'pi pi-exclamation-triangle',
     acceptLabel: 'Eliminar',
@@ -409,10 +413,12 @@ function confirmDelete(c: Cotizacion): void {
 
 // ---- PDF ----
 const pdfLoading = ref<string | null>(null)
-async function verPdf(c: Cotizacion): Promise<void> {
-  pdfLoading.value = c._id
+// Con `version` se descarga el PDF de una versión anterior, tal como la
+// recibió el cliente en su momento (el servidor lo arma desde el historial).
+async function verPdf(c: Cotizacion, version?: number): Promise<void> {
+  pdfLoading.value = version ? `${c._id}:v${version}` : c._id
   try {
-    const result = (await feathersClient.service('cotizacion-pdf').create({ cotizacionId: c._id })) as {
+    const result = (await feathersClient.service('cotizacion-pdf').create({ cotizacionId: c._id, version })) as {
       pdfBase64: string
       filename: string
     }
@@ -427,6 +433,18 @@ async function verPdf(c: Cotizacion): Promise<void> {
 // ---- Detalle ----
 const detalle = ref<Cotizacion | null>(null)
 const detalleVisible = ref(false)
+
+// ---- Versión anterior ----
+// Una foto del historial (lo que el cliente recibió antes de una
+// modificación), abierta desde la cronología del detalle. Solo se mira: la
+// versión vigente es la única editable.
+const versionVista = ref<CotizacionVersion | null>(null)
+const versionVisible = ref(false)
+
+function openVersion(v: CotizacionVersion): void {
+  versionVista.value = v
+  versionVisible.value = true
+}
 // Documentos generados desde la cotización, cargados al abrir el detalle
 // para mostrar folio y estado SII de cada uno.
 const documentosDe = ref<Record<string, DteDocument>>({})
@@ -855,7 +873,7 @@ const rowMenuItems = computed<MenuItem[]>(() => {
     { label: 'Reabrir', icon: 'pi pi-undo', visible: (c.estado === 'aceptada' || c.estado === 'rechazada') && c.facturas.length === 0, command: () => void reabrir(c) },
     { separator: true },
     { label: 'Duplicar', icon: 'pi pi-copy', command: () => openDuplicate(c) },
-    { label: 'Eliminar', icon: 'pi pi-trash', visible: (c.estado === 'borrador' || c.estado === 'rechazada') && c.facturas.length === 0, command: () => confirmDelete(c) }
+    { label: 'Eliminar', icon: 'pi pi-trash', visible: c.facturas.length === 0, command: () => confirmDelete(c) }
   ]
 })
 
@@ -1271,6 +1289,8 @@ onMounted(async () => {
           <ul class="historial">
             <li v-for="v in detalle.versiones" :key="`v${v.version}`">
               <span class="muted">{{ formatFecha(v.reemplazadaAt) }}</span> Versión {{ v.version }} reemplazada (total ${{ formatMoney(v.montos.total) }}, {{ v.items.length }} ítems)
+              · <a class="link" @click="openVersion(v)">Ver</a>
+              · <a class="link" @click="verPdf(detalle, v.version)">PDF</a>
             </li>
             <li v-for="(e, i) in detalle.envios" :key="`e${i}`">
               <span class="muted">{{ formatFecha(e.enviadoAt) }}</span> Versión {{ e.version }} enviada a {{ e.destinatario }}
@@ -1281,6 +1301,57 @@ onMounted(async () => {
           </ul>
         </template>
       </div>
+    </Dialog>
+
+    <!-- ================= Versión anterior ================= -->
+    <Dialog
+      v-model:visible="versionVisible"
+      modal
+      :header="detalle && versionVista ? `${detalle.numeroFormateado} · versión ${versionVista.version} (reemplazada el ${formatFecha(versionVista.reemplazadaAt)})` : ''"
+      style="width: min(900px, 96vw)"
+    >
+      <div v-if="detalle && versionVista">
+        <p class="muted" style="margin: 0 0 0.75rem">
+          Así era la cotización antes de modificarla. Validez de {{ versionVista.validezDias }} días, hasta el
+          {{ formatFecha(versionVista.fechaVencimiento) }}. La versión vigente es la {{ detalle.version }}.
+        </p>
+
+        <h3 class="section-title">Ítems</h3>
+        <table class="tabla">
+          <thead>
+            <tr><th>Descripción</th><th class="num">Cant.</th><th class="num">Precio</th><th class="num">Desc.</th><th class="num">Total</th></tr>
+          </thead>
+          <tbody>
+            <tr v-for="(item, i) in versionVista.items" :key="i">
+              <td>{{ item.descripcion }}<span v-if="item.exento" class="muted"> (exento)</span></td>
+              <td class="num">{{ item.cantidad }} {{ item.unidad }}</td>
+              <td class="num">${{ formatMoney(item.precioUnit) }}</td>
+              <td class="num">{{ item.descuento ? `$${formatMoney(item.descuento)}` : '' }}</td>
+              <td class="num">${{ formatMoney(montoItem(item)) }}</td>
+            </tr>
+          </tbody>
+          <tfoot>
+            <tr v-if="versionVista.descuentoGlobalPct"><td colspan="4" class="num">Descuento global</td><td class="num">{{ versionVista.descuentoGlobalPct }}%</td></tr>
+            <tr><td colspan="4" class="num">Neto</td><td class="num">${{ formatMoney(versionVista.montos.neto) }}</td></tr>
+            <tr v-if="versionVista.montos.exento"><td colspan="4" class="num">Exento</td><td class="num">${{ formatMoney(versionVista.montos.exento) }}</td></tr>
+            <tr><td colspan="4" class="num">IVA</td><td class="num">${{ formatMoney(versionVista.montos.iva) }}</td></tr>
+            <tr class="fila-total"><td colspan="4" class="num">Total</td><td class="num">${{ formatMoney(versionVista.montos.total) }}</td></tr>
+          </tfoot>
+        </table>
+
+        <p v-if="versionVista.condiciones" class="muted" style="white-space: pre-line"><strong>Condiciones:</strong> {{ versionVista.condiciones }}</p>
+      </div>
+      <template #footer>
+        <Button label="Cerrar" text @click="versionVisible = false" />
+        <Button
+          v-if="detalle && versionVista"
+          label="PDF de esta versión"
+          icon="pi pi-file-pdf"
+          outlined
+          :loading="pdfLoading === `${detalle._id}:v${versionVista.version}`"
+          @click="verPdf(detalle, versionVista.version)"
+        />
+      </template>
     </Dialog>
 
     <!-- ================= Enviar ================= -->

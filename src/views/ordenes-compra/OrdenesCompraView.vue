@@ -294,7 +294,10 @@ async function handleSave(): Promise<void> {
 
 function confirmDelete(o: OrdenCompra): void {
   confirm.require({
-    message: `¿Eliminar la orden de compra ${o.numeroFormateado}?`,
+    message:
+      o.envios.length > 0
+        ? `¿Eliminar la orden de compra ${o.numeroFormateado}? El proveedor ya la recibió por correo; si prefieres dejar constancia, anúlala en vez de eliminarla.`
+        : `¿Eliminar la orden de compra ${o.numeroFormateado}?`,
     header: 'Confirmar',
     icon: 'pi pi-exclamation-triangle',
     acceptLabel: 'Eliminar',
@@ -657,7 +660,7 @@ const rowMenuItems = computed<MenuItem[]>(() => {
     { label: 'Reabrir', icon: 'pi pi-undo', visible: !curso, command: () => void cerrarOrden(o._id, 'reabrir') },
     { separator: true },
     { label: 'Duplicar', icon: 'pi pi-copy', command: () => openDuplicate(o) },
-    { label: 'Eliminar', icon: 'pi pi-trash', visible: (o.estado === 'borrador' || o.estado === 'anulada') && sinMovimientos, command: () => confirmDelete(o) }
+    { label: 'Eliminar', icon: 'pi pi-trash', visible: sinMovimientos, command: () => confirmDelete(o) }
   ]
 })
 
