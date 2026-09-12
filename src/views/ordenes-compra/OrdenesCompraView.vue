@@ -20,6 +20,7 @@ import AyudaPagina from '@/components/AyudaPagina.vue'
 import { useListaPaginada } from '@/composables/useListaPaginada'
 import { useResource } from '@/composables/useResource'
 import { feathersClient } from '@/services/feathers'
+import { descargarPdf } from '@/pdf'
 import type { OrdenCompra, OrdenCompraItem, Paginated, Product, Purchase, Supplier, ValorUf } from '@/types'
 import { AYUDA_ORDENES_COMPRA } from './ayuda-ordenes-compra'
 
@@ -315,10 +316,11 @@ const pdfLoading = ref<string | null>(null)
 async function verPdf(o: OrdenCompra): Promise<void> {
   pdfLoading.value = o._id
   try {
-    const result = (await feathersClient.service('orden-compra-pdf').create({ ordenCompraId: o._id })) as { pdfBase64: string }
-    const bytes = Uint8Array.from(atob(result.pdfBase64), (ch) => ch.charCodeAt(0))
-    const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }))
-    window.open(url, '_blank')
+    const result = (await feathersClient.service('orden-compra-pdf').create({ ordenCompraId: o._id })) as {
+      pdfBase64: string
+      filename: string
+    }
+    descargarPdf(result.pdfBase64, result.filename)
   } catch (e) {
     avisarError('No se pudo generar el PDF', e)
   } finally {

@@ -21,6 +21,7 @@ import AyudaPagina from '@/components/AyudaPagina.vue'
 import { useListaPaginada } from '@/composables/useListaPaginada'
 import { useResource } from '@/composables/useResource'
 import { feathersClient } from '@/services/feathers'
+import { descargarPdf } from '@/pdf'
 import type {
   Cotizacion,
   CotizacionItem,
@@ -411,10 +412,11 @@ const pdfLoading = ref<string | null>(null)
 async function verPdf(c: Cotizacion): Promise<void> {
   pdfLoading.value = c._id
   try {
-    const result = (await feathersClient.service('cotizacion-pdf').create({ cotizacionId: c._id })) as { pdfBase64: string }
-    const bytes = Uint8Array.from(atob(result.pdfBase64), (ch) => ch.charCodeAt(0))
-    const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }))
-    window.open(url, '_blank')
+    const result = (await feathersClient.service('cotizacion-pdf').create({ cotizacionId: c._id })) as {
+      pdfBase64: string
+      filename: string
+    }
+    descargarPdf(result.pdfBase64, result.filename)
   } catch (e) {
     avisarError('No se pudo generar el PDF', e)
   } finally {
@@ -720,23 +722,29 @@ function openFacturarMonto(): void {
   facturarMontoVisible.value = true
 }
 
-const facturarMenu = ref()
-const facturarMenuItems = computed<MenuItem[]>(() => {
-  const c = detalle.value
+// Las opciones de facturación, para una cotización dada. Las usa el botón
+// "Facturar" del detalle y también el menú de cada fila de la lista, para
+// no tener que abrir el detalle solo para facturar. Las acciones trabajan
+// sobre `detalle` (los diálogos de ítems y monto leen de ahí), así que quien
+// las invoque desde la lista debe dejar la cotización en `detalle` antes.
+function opcionesFacturar(c: Cotizacion | null): { label: string; icon: string; visible: boolean; disabled: boolean; command: () => void }[] {
   const porCuota = c?.planPago?.modalidad === 'factura_por_cuota'
   return [
-    { label: 'Total', icon: 'pi pi-file', disabled: porCuota || (c?.montoFacturado ?? 0) > 0, command: () => void facturar({ modo: 'total' }) },
-    { label: 'Por ítems…', icon: 'pi pi-list', disabled: porCuota || !!c?.descuentoGlobalPct, command: openFacturarItems },
-    { label: 'Por monto (anticipo/saldo)…', icon: 'pi pi-percentage', disabled: porCuota, command: openFacturarMonto },
+    { label: 'Total', icon: 'pi pi-file', visible: true, disabled: porCuota || (c?.montoFacturado ?? 0) > 0, command: () => void facturar({ modo: 'total' }) },
+    { label: 'Por ítems…', icon: 'pi pi-list', visible: true, disabled: porCuota || !!c?.descuentoGlobalPct, command: openFacturarItems },
+    { label: 'Por monto (anticipo/saldo)…', icon: 'pi pi-percentage', visible: true, disabled: porCuota, command: openFacturarMonto },
     {
       label: 'Pie del plan',
       icon: 'pi pi-wallet',
       visible: !!c?.planPago?.pie,
-      disabled: c?.facturas.some((f) => f.origen === 'pie'),
+      disabled: !!c?.facturas.some((f) => f.origen === 'pie'),
       command: () => void facturar({ modo: 'pie' })
     }
   ]
-})
+}
+
+const facturarMenu = ref()
+const facturarMenuItems = computed<MenuItem[]>(() => opcionesFacturar(detalle.value))
 
 // ---- Cuotas ----
 const pagarVisible = ref(false)
@@ -813,8 +821,31 @@ const rowMenuItems = computed<MenuItem[]>(() => {
   if (!c) return []
   const editable = c.estado === 'borrador' || c.estado === 'enviada'
   const decidible = c.estado === 'borrador' || c.estado === 'enviada'
+  const facturable = (c.estado === 'aceptada' || c.estado === 'facturada') && c.montos.total - c.montoFacturado > 0
   return [
     { label: 'Ver detalle', icon: 'pi pi-eye', command: () => void openDetalle(c) },
+    { separator: true, visible: facturable },
+    // Las mismas opciones que el botón "Facturar" del detalle, pero sin
+    // tener que abrirlo. Cada acción deja la cotización en `detalle` porque
+    // los diálogos y `facturar` trabajan sobre ella.
+    ...opcionesFacturar(c).map((opcion) => ({
+      label: `Facturar: ${opcion.label}`,
+      icon: opcion.icon,
+      visible: facturable && opcion.visible,
+      disabled: opcion.disabled,
+      command: () => {
+        detalle.value = c
+        opcion.command()
+      }
+    })),
+    // Con factura por cuota cada cuota se factura desde la tabla del plan,
+    // que está en el detalle.
+    {
+      label: 'Facturar cuotas del plan…',
+      icon: 'pi pi-calendar',
+      visible: facturable && c.planPago?.modalidad === 'factura_por_cuota',
+      command: () => void openDetalle(c)
+    },
     { label: 'Editar', icon: 'pi pi-pencil', visible: editable, command: () => openEdit(c) },
     { label: 'Enviar por correo', icon: 'pi pi-send', visible: c.estado !== 'rechazada' && c.estado !== 'facturada', command: () => openEnviar(c) },
     { label: 'PDF', icon: 'pi pi-file-pdf', command: () => void verPdf(c) },
