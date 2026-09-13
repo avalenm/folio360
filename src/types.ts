@@ -596,6 +596,8 @@ export interface Cotizacion {
   _id: string
   numero: number
   numeroFormateado: string
+  // "COT-000001 v2": número y versión juntos, lo calcula el servidor.
+  identificador: string
   version: number
   versiones: CotizacionVersion[]
   customerId: string

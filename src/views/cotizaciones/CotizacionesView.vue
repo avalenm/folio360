@@ -383,7 +383,7 @@ async function handleSave(): Promise<void> {
       }
     } else {
       const creada = await create(payloadDraft() as Partial<Cotizacion>)
-      toast.add({ severity: 'success', summary: `${creada.numeroFormateado} creada`, life: 2500 })
+      toast.add({ severity: 'success', summary: `${creada.identificador} creada`, life: 2500 })
     }
     dialogVisible.value = false
   } catch (e) {
@@ -397,8 +397,8 @@ function confirmDelete(c: Cotizacion): void {
   confirm.require({
     message:
       c.envios.length > 0
-        ? `¿Eliminar la cotización ${c.numeroFormateado}? El cliente ya la recibió por correo; si prefieres dejar constancia, márcala rechazada en vez de eliminarla.`
-        : `¿Eliminar la cotización ${c.numeroFormateado}?`,
+        ? `¿Eliminar la cotización ${c.identificador}? El cliente ya la recibió por correo; si prefieres dejar constancia, márcala rechazada en vez de eliminarla.`
+        : `¿Eliminar la cotización ${c.identificador}?`,
     header: 'Confirmar',
     icon: 'pi pi-exclamation-triangle',
     acceptLabel: 'Eliminar',
@@ -675,7 +675,7 @@ async function handleAceptar(): Promise<void> {
 
 function confirmRechazar(c: Cotizacion): void {
   confirm.require({
-    message: `¿Marcar ${c.numeroFormateado} como rechazada por el cliente?`,
+    message: `¿Marcar ${c.identificador} como rechazada por el cliente?`,
     header: 'Rechazar cotización',
     icon: 'pi pi-times-circle',
     acceptLabel: 'Rechazar',
@@ -936,10 +936,7 @@ onMounted(async () => {
       <template #empty>No hay cotizaciones{{ filterNumero || filterCliente || filterEstado || filterFechas ? ' con esos filtros' : '' }}.</template>
       <Column header="N°">
         <template #body="{ data }">
-          <div class="stacked-cell">
-            <strong>{{ data.numeroFormateado }}</strong>
-            <span v-if="data.version > 1" class="muted">versión {{ data.version }}</span>
-          </div>
+          <strong>{{ data.identificador }}</strong>
         </template>
       </Column>
       <Column header="Fecha">
@@ -1155,7 +1152,7 @@ onMounted(async () => {
       </template>
     </Dialog>
 
-    <Dialog v-model:visible="detalleVisible" modal :header="detalle ? `${detalle.numeroFormateado} · versión ${detalle.version}` : ''" style="width: min(1000px, 96vw)">
+    <Dialog v-model:visible="detalleVisible" modal :header="detalle ? detalle.identificador : ''" style="width: min(1000px, 96vw)">
       <div v-if="detalle" class="detalle">
         <div class="detalle-head">
           <div class="stacked-cell">
@@ -1333,7 +1330,7 @@ onMounted(async () => {
     <Dialog
       v-model:visible="versionVisible"
       modal
-      :header="detalle && versionVista ? `${detalle.numeroFormateado} · versión ${versionVista.version} (reemplazada el ${formatFecha(versionVista.reemplazadaAt)})` : ''"
+      :header="detalle && versionVista ? `${detalle.numeroFormateado} v${versionVista.version} (reemplazada el ${formatFecha(versionVista.reemplazadaAt)})` : ''"
       style="width: min(900px, 96vw)"
     >
       <div v-if="detalle && versionVista">
@@ -1468,7 +1465,7 @@ onMounted(async () => {
     <Dialog v-model:visible="facturarMontoVisible" modal header="Facturar por monto" style="width: min(520px, 94vw)">
       <div class="form-col">
         <label class="field"><span>Monto (con IVA) — restan ${{ formatMoney(restante) }}</span><InputNumber v-model="facturaMonto.monto" :min="1" :max="restante" prefix="$" fluid /></label>
-        <label class="field"><span>Glosa</span><InputText v-model="facturaMonto.glosa" :placeholder="`A cuenta de cotización ${detalle?.numeroFormateado ?? ''}`" fluid /></label>
+        <label class="field"><span>Glosa</span><InputText v-model="facturaMonto.glosa" :placeholder="`A cuenta de cotización ${detalle?.identificador ?? ''}`" fluid /></label>
         <p class="muted">El monto se reparte entre afecto y exento en la misma proporción de la cotización. Por el redondeo neto/IVA, la factura puede diferir en $1.</p>
       </div>
       <template #footer>
