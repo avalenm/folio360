@@ -523,12 +523,14 @@ function irADocumentos(): void {
 }
 
 const restante = computed(() => (detalle.value ? detalle.value.montos.total - detalle.value.montoFacturado : 0))
-const pendienteReenvio = computed(() => {
-  const c = detalle.value
+// Enviada y editada después: la versión vigente es más nueva que la que
+// recibió el destinatario. Lo avisan el detalle y la lista.
+function tieneVersionSinEnviar(c: Cotizacion | null | undefined): boolean {
   if (!c || c.estado !== 'enviada') return false
   const ultimo = c.envios[c.envios.length - 1]
   return !ultimo || ultimo.version < c.version
-})
+}
+const pendienteReenvio = computed(() => tieneVersionSinEnviar(detalle.value))
 
 // ---- Enviar por correo ----
 const enviarVisible = ref(false)
@@ -983,8 +985,16 @@ onMounted(async () => {
             :title="`Versión ${ data.envios[data.envios.length - 1].version } de la cotización enviada por correo a ${ data.envios[data.envios.length - 1].destinatario }`"
           >
             <i class="pi pi-envelope" />
-            {{ data.envios[data.envios.length - 1].destinatario }} ·
+            v{{ data.envios[data.envios.length - 1].version }} · {{ data.envios[data.envios.length - 1].destinatario }} ·
             {{ formatFechaHora(data.envios[data.envios.length - 1].enviadoAt) }}
+          </div>
+          <div
+            v-if="tieneVersionSinEnviar(data)"
+            class="correo-enviado version-sin-enviar"
+            :title="`Se editó después del último envío: la versión ${data.version} todavía no se le envió`"
+          >
+            <i class="pi pi-exclamation-triangle" />
+            v{{ data.version }} sin enviar
           </div>
         </template>
       </Column>
@@ -1553,6 +1563,11 @@ onMounted(async () => {
   gap: 0.3rem;
   margin-top: 0.35rem;
   white-space: nowrap;
+}
+.version-sin-enviar {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--warning);
 }
 .muted {
   font-size: 0.78rem;

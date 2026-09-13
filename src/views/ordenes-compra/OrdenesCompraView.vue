@@ -404,12 +404,14 @@ const recepcionable = computed(() => {
   const e = detalle.value?.estado
   return e === 'borrador' || e === 'enviada' || e === 'recibida_parcial'
 })
-const pendienteReenvio = computed(() => {
-  const o = detalle.value
+// Enviada y editada después: la versión vigente es más nueva que la que
+// recibió el destinatario. Lo avisan el detalle y la lista.
+function tieneVersionSinEnviar(o: OrdenCompra | null | undefined): boolean {
   if (!o || o.estado !== 'enviada') return false
   const ultimo = o.envios[o.envios.length - 1]
   return !ultimo || ultimo.version < o.version
-})
+}
+const pendienteReenvio = computed(() => tieneVersionSinEnviar(detalle.value))
 const resumenRecepcion = computed(() => {
   const items = detalle.value?.items ?? []
   const pedido = items.reduce((s, i) => s + i.cantidad, 0)
@@ -768,8 +770,16 @@ onMounted(async () => {
             :title="`Versión ${ data.envios[data.envios.length - 1].version } de la orden de compra enviada por correo a ${ data.envios[data.envios.length - 1].destinatario }`"
           >
             <i class="pi pi-envelope" />
-            {{ data.envios[data.envios.length - 1].destinatario }} ·
+            v{{ data.envios[data.envios.length - 1].version }} · {{ data.envios[data.envios.length - 1].destinatario }} ·
             {{ formatFechaHora(data.envios[data.envios.length - 1].enviadoAt) }}
+          </div>
+          <div
+            v-if="tieneVersionSinEnviar(data)"
+            class="correo-enviado version-sin-enviar"
+            :title="`Se editó después del último envío: la versión ${data.version} todavía no se le envió`"
+          >
+            <i class="pi pi-exclamation-triangle" />
+            v{{ data.version }} sin enviar
           </div>
         </template>
       </Column>
@@ -1152,6 +1162,11 @@ onMounted(async () => {
   gap: 0.3rem;
   margin-top: 0.35rem;
   white-space: nowrap;
+}
+.version-sin-enviar {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--warning);
 }
 .muted {
   font-size: 0.78rem;
