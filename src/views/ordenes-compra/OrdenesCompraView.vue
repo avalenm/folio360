@@ -101,6 +101,10 @@ function formatFecha(value: string | Date | undefined): string {
   if (!value) return ''
   return new Date(value).toLocaleDateString('es-CL')
 }
+function formatFechaHora(value: string | Date | undefined): string {
+  if (!value) return ''
+  return new Date(value).toLocaleString('es-CL', { dateStyle: 'short', timeStyle: 'short' })
+}
 function mensajeDe(e: unknown): string | undefined {
   return e instanceof Error ? e.message : undefined
 }
@@ -755,6 +759,18 @@ onMounted(async () => {
       <Column header="Estado">
         <template #body="{ data }">
           <Tag :severity="estadoSeverity[data.estadoVisible]" :value="ESTADO_LABELS[data.estadoVisible] ?? data.estadoVisible" />
+          <!-- Último envío por correo (a quién y cuándo), igual que Documentos
+               muestra el correo al receptor: para no tener que abrir el
+               detalle a comprobarlo. -->
+          <div
+            v-if="data.envios.length"
+            class="muted correo-enviado"
+            :title="`Versión ${ data.envios[data.envios.length - 1].version } de la orden de compra enviada por correo a ${ data.envios[data.envios.length - 1].destinatario }`"
+          >
+            <i class="pi pi-envelope" />
+            {{ data.envios[data.envios.length - 1].destinatario }} ·
+            {{ formatFechaHora(data.envios[data.envios.length - 1].enviadoAt) }}
+          </div>
         </template>
       </Column>
       <Column header="" style="width: 3rem">
@@ -1129,6 +1145,13 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   gap: 0.15rem;
+}
+.correo-enviado {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-top: 0.35rem;
+  white-space: nowrap;
 }
 .muted {
   font-size: 0.78rem;
