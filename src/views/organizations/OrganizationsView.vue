@@ -406,7 +406,6 @@ async function confirmarCambioAmbiente(): Promise<void> {
   display: flex;
   flex-direction: column;
   gap: 1.25rem;
-  max-width: 860px;
 }
 
 .org-card {
@@ -505,21 +504,22 @@ async function confirmarCambioAmbiente(): Promise<void> {
   flex-wrap: wrap;
 }
 
-/* Datos: ficha en cuadrícula, con líneas suaves entre celdas */
+/* Datos: ficha en cuadrícula. Cada celda dibuja su propia línea derecha e
+   inferior (sombra interior) en vez de usar el fondo de la cuadrícula como
+   "gap": así las celdas vacías de la última fila quedan en blanco y no en
+   gris. El margen negativo saca la línea derecha de la última columna fuera
+   de la tarjeta, que la recorta con overflow: hidden. */
 .org-datos {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 1px;
-  margin: 0;
-  background: var(--card-border);
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  margin: 0 -1px 0 0;
   border-top: 1px solid var(--card-border);
-  border-bottom: 1px solid var(--card-border);
 }
 
 .dato {
-  background: var(--card-bg);
   padding: 0.9rem 1.75rem;
   min-width: 0;
+  box-shadow: inset -1px -1px 0 var(--card-border);
 }
 
 .org-datos dt {

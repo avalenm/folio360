@@ -202,10 +202,9 @@ async function handleSave(): Promise<void> {
 <style scoped>
 .perfil-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 340px;
+  grid-template-columns: minmax(0, 1fr) 400px;
   gap: 1.25rem;
   align-items: start;
-  max-width: 1040px;
 }
 
 @media (max-width: 960px) {
@@ -305,7 +304,7 @@ async function handleSave(): Promise<void> {
   display: flex;
   flex-direction: column;
   gap: 1rem;
-  max-width: 420px;
+  max-width: 560px;
 }
 
 .field-hint {
@@ -448,6 +447,11 @@ async function handleSave(): Promise<void> {
   gap: 0.5rem;
   font-size: var(--text-xs);
   color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.membresia .p-tag {
+  flex-shrink: 0;
 }
 
 .membresia-actual {
