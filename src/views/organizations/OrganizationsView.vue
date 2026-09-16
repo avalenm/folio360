@@ -11,7 +11,7 @@ import Tag from 'primevue/tag'
 import { useToast } from 'primevue/usetoast'
 import { feathersClient } from '@/services/feathers'
 import { useAuthStore } from '@/stores/auth'
-import type { Ambiente, Organization } from '@/types'
+import type { Ambiente, Organization, Role } from '@/types'
 
 // El servicio de control-plane `organizations` ahora filtra por membership
 // (ver hooks de organizations.service.ts en el servidor) — esta pantalla de
@@ -44,6 +44,30 @@ function canEdit(org: Organization): boolean {
 // deja solo el dueño de la organización.
 function puedeCambiarAmbiente(org: Organization): boolean {
   return rolEn(org) === 'owner'
+}
+
+// Mismas etiquetas que en Miembros: el rol en crudo ("owner") es jerga del
+// servidor, no algo que el usuario deba leer.
+const ROLE_LABEL: Record<Role, string> = {
+  owner: 'Propietario',
+  admin: 'Administrador',
+  contador: 'Contador',
+  vendedor: 'Vendedor'
+}
+
+function esActual(org: Organization): boolean {
+  return auth.currentOrganization?._id === org._id
+}
+
+function fechaCorta(iso?: string): string | null {
+  if (!iso) return null
+  return new Date(iso).toLocaleDateString('es-CL', { day: '2-digit', month: 'short', year: 'numeric' })
+}
+
+function direccionDe(org: Organization): string | null {
+  const d = org.direccion
+  if (!d) return null
+  return [d.calle, d.comuna, d.ciudad].filter(Boolean).join(', ') || null
 }
 
 const ESTADO_LABEL: Record<string, string> = {
@@ -161,16 +185,26 @@ async function confirmarCambioAmbiente(): Promise<void> {
 
 <template>
   <div>
-    <h1 class="page-title">Mis organizaciones <AyudaPagina titulo="Organizaciones" :secciones="AYUDA_ORGANIZACIONES" /></h1>
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Mis organizaciones <AyudaPagina titulo="Organizaciones" :secciones="AYUDA_ORGANIZACIONES" /></h1>
+        <p class="page-subtitle">
+          Las empresas a las que tienes acceso. Sus datos van impresos en cada documento que emites.
+        </p>
+      </div>
+    </div>
 
     <div class="org-lista">
-      <section v-for="org in auth.organizations" :key="org._id" class="org-card">
+      <section v-for="org in auth.organizations" :key="org._id" class="surface-card org-card" :class="{ actual: esActual(org) }">
         <header class="org-header">
           <div class="org-identidad">
             <img v-if="org.logoPng" :src="`data:image;base64,${org.logoPng}`" alt="" class="org-logo" />
             <span v-else class="org-inicial">{{ org.razonSocial?.[0] ?? '?' }}</span>
-            <div>
-              <div class="org-name">{{ org.razonSocial }}</div>
+            <div class="org-quien">
+              <div class="org-name">
+                {{ org.razonSocial }}
+                <span v-if="esActual(org)" class="org-actual-pill"><i class="pi pi-check" /> Actual</span>
+              </div>
               <div class="org-rut">{{ org.rut }}</div>
             </div>
           </div>
@@ -184,20 +218,43 @@ async function confirmarCambioAmbiente(): Promise<void> {
         </header>
 
         <dl class="org-datos">
-          <div><dt>Giro</dt><dd>{{ org.giro || '—' }}</dd></div>
-          <div><dt>Unidad del SII</dt><dd>{{ org.unidadSii || '—' }}</dd></div>
-          <div><dt>Resolución</dt><dd>N° {{ org.resolucionNumero ?? 0 }}</dd></div>
-          <div><dt>Tu rol</dt><dd>{{ rolEn(org) ?? '—' }}</dd></div>
+          <div class="dato">
+            <dt>Giro</dt>
+            <dd>{{ org.giro || '—' }}</dd>
+          </div>
+          <div class="dato">
+            <dt>Unidad del SII</dt>
+            <dd>{{ org.unidadSii || '—' }}</dd>
+          </div>
+          <div class="dato">
+            <dt>Resolución SII</dt>
+            <dd>
+              N° {{ org.resolucionNumero ?? 0 }}
+              <span v-if="fechaCorta(org.resolucionFecha)" class="dato-sub">del {{ fechaCorta(org.resolucionFecha) }}</span>
+            </dd>
+          </div>
+          <div v-if="direccionDe(org)" class="dato">
+            <dt>Dirección</dt>
+            <dd>{{ direccionDe(org) }}</dd>
+          </div>
+          <div v-if="org.tasaPpmPct != null" class="dato">
+            <dt>Tasa PPM</dt>
+            <dd>{{ org.tasaPpmPct }} %</dd>
+          </div>
+          <div class="dato">
+            <dt>Tu rol</dt>
+            <dd>{{ rolEn(org) ? ROLE_LABEL[rolEn(org) as Role] : '—' }}</dd>
+          </div>
         </dl>
 
         <!-- El ambiente va en su propio bloque, no como un dato más: es lo que
              decide si lo que emitas tiene validez tributaria. -->
         <div class="ambiente-bloque" :class="org.ambiente">
+          <span class="ambiente-icono">
+            <i :class="org.ambiente === 'produccion' ? 'pi pi-check-circle' : 'pi pi-exclamation-triangle'" />
+          </span>
           <div class="ambiente-texto">
-            <strong>
-              <i :class="org.ambiente === 'produccion' ? 'pi pi-check-circle' : 'pi pi-exclamation-triangle'" />
-              {{ AMBIENTE_LABEL[org.ambiente] }}
-            </strong>
+            <strong>{{ AMBIENTE_LABEL[org.ambiente] }}</strong>
             <span v-if="org.ambiente === 'certificacion'">
               Todo lo que emitas va al servidor de pruebas del SII y no tiene validez tributaria. Es donde se hace
               la certificación.
@@ -210,14 +267,21 @@ async function confirmarCambioAmbiente(): Promise<void> {
             v-if="puedeCambiarAmbiente(org)"
             :label="org.ambiente === 'produccion' ? 'Volver a certificación' : 'Pasar a producción'"
             :severity="org.ambiente === 'produccion' ? 'secondary' : 'success'"
-            :text="org.ambiente === 'produccion'"
+            :outlined="org.ambiente === 'produccion'"
             size="small"
+            class="ambiente-boton"
             @click="abrirCambioAmbiente(org)"
           />
         </div>
 
         <footer class="org-acciones">
-          <Button v-if="canEdit(org)" label="Editar datos" icon="pi pi-pencil" text @click="openEdit(org)" />
+          <span v-if="canEdit(org)" class="org-acciones-hint">
+            Razón social, giro, resolución y logo se editan acá; los cambios se reflejan en los próximos documentos.
+          </span>
+          <span v-else class="org-acciones-hint">
+            Solo el propietario o un administrador puede editar estos datos.
+          </span>
+          <Button v-if="canEdit(org)" label="Editar datos" icon="pi pi-pencil" outlined size="small" @click="openEdit(org)" />
         </footer>
       </section>
     </div>
@@ -338,73 +402,101 @@ async function confirmarCambioAmbiente(): Promise<void> {
 </template>
 
 <style scoped>
-.page-title {
-  margin: 0 0 1.25rem;
-  font-size: 1.4rem;
-}
-
 .org-lista {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
-  max-width: 760px;
+  gap: 1.25rem;
+  max-width: 860px;
 }
 
 .org-card {
-  background: #fff;
-  border-radius: 12px;
-  padding: 1.25rem 1.4rem;
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  overflow: hidden;
+}
+
+.org-card.actual {
+  border-color: rgb(79 70 229 / 0.35);
 }
 
 .org-header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 1rem;
   flex-wrap: wrap;
+  padding: 1.5rem 1.75rem;
 }
 
 .org-identidad {
   display: flex;
   align-items: center;
-  gap: 0.85rem;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.org-logo,
+.org-inicial {
+  width: 56px;
+  height: 56px;
+  flex-shrink: 0;
+  border-radius: var(--radius-md);
 }
 
 .org-logo {
-  width: 44px;
-  height: 44px;
   object-fit: contain;
-  border-radius: 8px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--card-border);
   background: #fff;
-  padding: 3px;
+  padding: 4px;
 }
 
 .org-inicial {
-  width: 44px;
-  height: 44px;
-  border-radius: 8px;
-  background: #eef2ff;
-  color: #4f46e5;
+  background: var(--accent-soft);
+  color: var(--accent);
   display: flex;
   align-items: center;
   justify-content: center;
   font-weight: 750;
-  font-size: 1.1rem;
+  font-size: var(--text-lg);
+}
+
+.org-quien {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
 }
 
 .org-name {
-  font-weight: 700;
-  font-size: 1.02rem;
+  font-weight: 650;
+  font-size: var(--text-lg);
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.org-actual-pill {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 999px;
+  padding: 0.1rem 0.5rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  letter-spacing: 0;
+}
+
+.org-actual-pill .pi {
+  font-size: 0.6rem;
 }
 
 .org-rut {
-  font-size: 0.82rem;
-  color: #64748b;
-  font-variant-numeric: tabular-nums;
+  font-size: var(--text-base);
+  color: var(--text-secondary);
 }
 
 .org-tags {
@@ -413,69 +505,128 @@ async function confirmarCambioAmbiente(): Promise<void> {
   flex-wrap: wrap;
 }
 
+/* Datos: ficha en cuadrícula, con líneas suaves entre celdas */
 .org-datos {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 0.75rem 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1px;
   margin: 0;
+  background: var(--card-border);
+  border-top: 1px solid var(--card-border);
+  border-bottom: 1px solid var(--card-border);
+}
+
+.dato {
+  background: var(--card-bg);
+  padding: 0.9rem 1.75rem;
+  min-width: 0;
 }
 
 .org-datos dt {
-  font-size: 0.72rem;
+  font-size: var(--text-xs);
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: #94a3b8;
-  font-weight: 700;
+  color: var(--text-tertiary);
+  font-weight: 600;
 }
 
 .org-datos dd {
-  margin: 0.15rem 0 0;
-  font-size: 0.88rem;
-  color: #1e293b;
+  margin: 0.2rem 0 0;
+  font-size: var(--text-base);
+  font-weight: 550;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.dato-sub {
+  display: block;
+  font-size: var(--text-xs);
+  font-weight: 400;
+  color: var(--text-secondary);
 }
 
 .ambiente-bloque {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 0.85rem 1rem;
-  border-radius: 10px;
+  gap: 0.9rem;
+  margin: 1.25rem 1.75rem 0;
+  padding: 0.9rem 1.1rem;
+  border-radius: var(--radius-md);
   flex-wrap: wrap;
 }
 
 .ambiente-bloque.certificacion {
-  background: #fffbeb;
-  border: 1px solid #fcd34d;
+  background: var(--warning-soft);
+  border: 1px solid #fedf89;
 }
 
 .ambiente-bloque.produccion {
-  background: #f0fdf4;
-  border: 1px solid #86efac;
+  background: var(--success-soft);
+  border: 1px solid #abefc6;
+}
+
+.ambiente-icono {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+}
+
+.certificacion .ambiente-icono {
+  background: #fef0c7;
+  color: var(--warning);
+}
+
+.produccion .ambiente-icono {
+  background: #d1fadf;
+  color: var(--success);
 }
 
 .ambiente-texto {
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
-  font-size: 0.83rem;
-  color: #475569;
+  gap: 0.15rem;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  flex: 1;
+  min-width: 220px;
   max-width: 62ch;
 }
 
 .ambiente-texto strong {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  font-size: 0.9rem;
-  color: #1e293b;
+  font-size: var(--text-base);
+  font-weight: 650;
+  color: var(--text-primary);
+}
+
+.ambiente-boton {
+  margin-left: auto;
 }
 
 .org-acciones {
   display: flex;
-  justify-content: flex-end;
-  border-top: 1px solid #f1f5f9;
-  padding-top: 0.5rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-top: 1.25rem;
+  padding: 0.9rem 1.75rem;
+  background: #fcfcfd;
+  border-top: 1px solid var(--card-border);
+}
+
+.org-acciones-hint {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  max-width: 60ch;
+}
+
+.org-acciones .p-button {
+  margin-left: auto;
 }
 
 .form-grid {
