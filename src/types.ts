@@ -15,6 +15,8 @@ export interface Organization {
   // la representación impresa (ver organization.model.ts en el servidor).
   unidadSii?: string
   tasaPpmPct?: number
+  // Preferencias de nóminas de pago: último formato y código de convenio.
+  pagosMasivos?: { formatoId?: string; codigoConvenio?: string }
   // Logotipo (PNG/JPEG en base64) para la esquina superior izquierda del
   // PDF — Manual de Muestras Impresas 1.1.3.
   logoPng?: string
@@ -309,6 +311,19 @@ export interface DteDocument {
   updatedAt: string
 }
 
+export type TipoCuentaBancaria = 'corriente' | 'vista' | 'ahorro' | 'renta'
+
+// Cuenta a la que se le paga al proveedor (nóminas de pago masivo). El
+// banco va por código SBIF, ver pagos.ts. `null` al guardar la borra.
+export interface SupplierDatosBancarios {
+  banco: string
+  tipoCuenta: TipoCuentaBancaria
+  numeroCuenta: string
+  rutTitular?: string
+  nombreTitular?: string
+  emailAviso?: string
+}
+
 export interface Supplier {
   _id: string
   rut: string
@@ -319,6 +334,53 @@ export interface Supplier {
   comuna?: string
   ciudad?: string
   email?: string
+  datosBancarios?: SupplierDatosBancarios | null
+  createdAt: string
+  updatedAt: string
+}
+
+// ---- Nóminas de pago masivo (server/src/services/pagos) ----
+export interface NominaFormato {
+  id: string
+  banco: string
+  nombre: string
+  pideConvenio: boolean
+  ayuda: string
+}
+
+export type NominaPagoEstado = 'generada' | 'pagada' | 'anulada'
+
+export interface NominaPagoItem {
+  purchaseId: string
+  supplierId: string
+  tipoDocumento: PurchaseTipoDocumento
+  folio: string
+  monto: number
+  rutTitular: string
+  nombreTitular: string
+  banco: string
+  tipoCuenta: string
+  numeroCuenta: string
+  emailAviso?: string
+  razonSocial: string
+}
+
+export interface NominaPago {
+  _id: string
+  numero: number
+  formatoId: string
+  banco: string
+  fechaPago: string
+  glosa?: string
+  estado: NominaPagoEstado
+  items: NominaPagoItem[]
+  total: number
+  archivoNombre: string
+  // Solo viene en get (para descargar de nuevo).
+  archivoContenido?: string
+  archivoMimeType: string
+  pagadaEn?: string
+  anuladaEn?: string
   createdAt: string
   updatedAt: string
 }

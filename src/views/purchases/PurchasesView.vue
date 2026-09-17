@@ -40,6 +40,9 @@ import {
   EXPLICACION_SIN_REGISTRO_EN_SII
 } from '@/types'
 import { acuseSegunSii, discrepanciaClasificacion, estadoVencimiento, fechaCorta, vencimientoDe } from '@/compras-sii'
+import type { NominaFormato, NominaPago } from '@/types'
+import { datosBancariosCompletos, descargarArchivoTexto, nombreBanco } from '@/pagos'
+import { useAuthStore } from '@/stores/auth'
 
 // La lista la pagina el SERVIDOR y los filtros viajan con la consulta: antes
 // se cargaban 100 compras y se filtraba sobre esas, así que buscar un folio
@@ -239,6 +242,72 @@ async function agregarPago(): Promise<void> {
 
 async function eliminarPago(indice: number): Promise<void> {
   await guardarPagos(pagosDelDocumento.value.filter((_, i) => i !== indice))
+}
+
+// ---- Nómina de pago masivo (server/src/services/pagos) ----
+// Se paga el SALDO de cada factura seleccionada; el archivo se sube a mano
+// al portal del banco y se confirma después en Nóminas de pago.
+const auth = useAuthStore()
+const nominaVisible = ref(false)
+const nominaFormatos = ref<NominaFormato[]>([])
+const nominaFormatoId = ref<string | null>(null)
+const nominaFechaPago = ref<Date>(new Date())
+const nominaGlosa = ref('')
+const nominaConvenio = ref('')
+const nominaGenerando = ref(false)
+
+const nominaFormato = computed(() => nominaFormatos.value.find((f) => f.id === nominaFormatoId.value) ?? null)
+
+// Las seleccionadas que efectivamente se pueden pagar: con saldo y de un
+// tipo que se paga (una nota de crédito no se transfiere).
+const nominaCandidatas = computed(() =>
+  selectedPurchases.value.filter((p) => saldoDe(p) > 0 && ['factura', 'boleta', 'nota_debito'].includes(p.tipoDocumento))
+)
+const nominaSinDatos = computed(() => nominaCandidatas.value.filter((p) => !datosBancariosCompletos(supplierOf(p.supplierId))))
+const nominaListas = computed(() => nominaCandidatas.value.filter((p) => datosBancariosCompletos(supplierOf(p.supplierId))))
+const nominaTotal = computed(() => nominaListas.value.reduce((s, p) => s + saldoDe(p), 0))
+
+async function openNomina(): Promise<void> {
+  nominaVisible.value = true
+  nominaGlosa.value = ''
+  nominaFechaPago.value = new Date()
+  if (nominaFormatos.value.length === 0) {
+    try {
+      nominaFormatos.value = (await feathersClient.service('nomina-formatos').find()) as NominaFormato[]
+    } catch (e) {
+      toast.add({ severity: 'error', summary: 'No se pudieron cargar los formatos de banco', detail: e instanceof Error ? e.message : undefined, life: 5000 })
+    }
+  }
+  const org = auth.currentOrganization
+  nominaFormatoId.value = org?.pagosMasivos?.formatoId ?? nominaFormatos.value[0]?.id ?? null
+  nominaConvenio.value = org?.pagosMasivos?.codigoConvenio ?? '001'
+}
+
+async function generarNomina(): Promise<void> {
+  if (!nominaFormatoId.value || nominaListas.value.length === 0) return
+  nominaGenerando.value = true
+  try {
+    const nomina = (await feathersClient.service('nominas-pago').create({
+      formatoId: nominaFormatoId.value,
+      purchaseIds: nominaListas.value.map((p) => p._id),
+      fechaPago: nominaFechaPago.value.toISOString(),
+      glosa: nominaGlosa.value || undefined,
+      codigoConvenio: nominaFormato.value?.pideConvenio ? nominaConvenio.value : undefined
+    })) as NominaPago
+    if (nomina.archivoContenido) descargarArchivoTexto(nomina.archivoNombre, nomina.archivoContenido, nomina.archivoMimeType)
+    nominaVisible.value = false
+    selectedPurchases.value = []
+    toast.add({
+      severity: 'success',
+      summary: `Nómina N° ${nomina.numero} generada y descargada`,
+      detail: `${nomina.items.length} documento(s), $${nomina.total.toLocaleString('es-CL')}. Súbela al portal del banco y confírmala en Nóminas de pago cuando esté pagada.`,
+      life: 8000
+    })
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'No se pudo generar la nómina', detail: e instanceof Error ? e.message : undefined, life: 9000 })
+  } finally {
+    nominaGenerando.value = false
+  }
 }
 
 function confirmDeleteSelected(): void {
@@ -701,6 +770,14 @@ onMounted(async () => {
 
     <div v-if="selectedPurchases.length > 0" class="bulk-bar surface-card">
       <span>{{ selectedPurchases.length }} seleccionado(s)</span>
+      <Button
+        label="Nómina de pago"
+        icon="pi pi-money-bill"
+        text
+        :disabled="nominaCandidatas.length === 0"
+        :title="nominaCandidatas.length === 0 ? 'Ninguna de las seleccionadas tiene saldo por pagar' : 'Generar el archivo de pago masivo para el banco'"
+        @click="openNomina"
+      />
       <Button label="Eliminar seleccionados" icon="pi pi-trash" severity="danger" text @click="confirmDeleteSelected" />
     </div>
 
@@ -958,6 +1035,72 @@ onMounted(async () => {
       </form>
     </Dialog>
 
+    <Dialog v-model:visible="nominaVisible" modal header="Nómina de pago masivo" style="width: 720px">
+      <div class="form-grid">
+        <p class="acuse-hint">
+          Se paga el <strong>saldo</strong> de cada documento. El archivo se descarga y se sube a mano al portal del banco;
+          los abonos se registran cuando confirmes la nómina en <RouterLink to="/nominas-pago">Nóminas de pago</RouterLink>.
+        </p>
+        <div class="nomina-campos">
+          <label class="field">
+            <span>Banco / formato</span>
+            <Select v-model="nominaFormatoId" :options="nominaFormatos" option-label="nombre" option-value="id" placeholder="Elige el banco" />
+          </label>
+          <label class="field">
+            <span>Fecha de pago</span>
+            <DatePicker v-model="nominaFechaPago" date-format="dd/mm/yy" show-icon icon-display="input" :min-date="new Date()" />
+          </label>
+          <label v-if="nominaFormato?.pideConvenio" class="field">
+            <span>Código de convenio</span>
+            <InputText v-model="nominaConvenio" inputmode="numeric" maxlength="3" placeholder="001" />
+          </label>
+          <label class="field">
+            <span>Glosa (opcional)</span>
+            <InputText v-model="nominaGlosa" maxlength="30" placeholder="Ej: Pago proveedores septiembre" />
+          </label>
+        </div>
+        <p v-if="nominaFormato" class="muted">{{ nominaFormato.ayuda }}</p>
+
+        <table class="nomina-tabla">
+          <thead>
+            <tr><th>Proveedor</th><th>Documento</th><th>Cuenta</th><th class="num">A pagar</th></tr>
+          </thead>
+          <tbody>
+            <tr v-for="p in nominaListas" :key="p._id">
+              <td>{{ supplierOf(p.supplierId)?.razonSocial ?? p.supplierId }}</td>
+              <td>{{ nombreDocumento(p) }} {{ p.folio }}</td>
+              <td class="muted">{{ nombreBanco(supplierOf(p.supplierId)?.datosBancarios?.banco) }} · {{ supplierOf(p.supplierId)?.datosBancarios?.numeroCuenta }}</td>
+              <td class="num">${{ saldoDe(p).toLocaleString('es-CL') }}</td>
+            </tr>
+            <tr v-for="p in nominaSinDatos" :key="p._id" class="fila-falta">
+              <td>{{ supplierOf(p.supplierId)?.razonSocial ?? p.supplierId }}</td>
+              <td>{{ nombreDocumento(p) }} {{ p.folio }}</td>
+              <td colspan="2">
+                <Tag severity="warn" value="Sin datos bancarios" />
+                <span class="muted"> queda fuera: completa banco y cuenta en <RouterLink to="/suppliers">Proveedores</RouterLink></span>
+              </td>
+            </tr>
+          </tbody>
+          <tfoot>
+            <tr>
+              <td colspan="3"><strong>Total de la nómina ({{ nominaListas.length }} documento{{ nominaListas.length === 1 ? '' : 's' }})</strong></td>
+              <td class="num"><strong>${{ nominaTotal.toLocaleString('es-CL') }}</strong></td>
+            </tr>
+          </tfoot>
+        </table>
+
+        <div class="form-actions">
+          <Button label="Cancelar" text @click="nominaVisible = false" />
+          <Button
+            label="Generar y descargar archivo"
+            icon="pi pi-download"
+            :loading="nominaGenerando"
+            :disabled="!nominaFormatoId || nominaListas.length === 0"
+            @click="generarNomina"
+          />
+        </div>
+      </div>
+    </Dialog>
     <Dialog v-model:visible="acuseVisible" modal header="Acuse/reclamo ante el SII" style="width: 480px">
       <div class="form-grid">
         <p class="acuse-hint">
@@ -1173,4 +1316,10 @@ onMounted(async () => {
   gap: 0.5rem;
   margin-top: 0.5rem;
 }
+.nomina-campos { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.75rem; }
+.nomina-tabla { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+.nomina-tabla th, .nomina-tabla td { text-align: left; padding: 0.35rem 0.4rem; border-bottom: 1px solid #f1f4f8; }
+.nomina-tabla .num { text-align: right; font-variant-numeric: tabular-nums; }
+.nomina-tabla tfoot td { border-top: 2px solid #e2e8f0; border-bottom: none; }
+.fila-falta td { color: #64748b; }
 </style>

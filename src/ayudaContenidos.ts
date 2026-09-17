@@ -84,6 +84,7 @@ export const AYUDA_COMPRAS: SeccionAyuda[] = [
   {
     titulo: 'Botones',
     items: [
+      { nombre: 'Nómina de pago', descripcion: 'Selecciona facturas con saldo y usa "Nómina de pago" para generar el archivo de transferencias masivas del banco (Scotiabank por ahora). Cada proveedor necesita banco y cuenta en su ficha. El archivo se sube a mano al portal del banco; los abonos se registran al confirmar la nómina en Nóminas de pago.' },
       { nombre: 'Nueva compra', descripcion: 'Ingreso manual — útil para facturas que el proveedor no envió por correo (revísalas en el Registro de Compras de sii.cl). El switch "electrónico" decide el código en el Libro (33 vs 30).' },
       { nombre: 'Tratamientos de IVA', descripcion: 'Crédito normal, uso común (con factor), no recuperable (con motivo) o retención total — determinan cómo entra al Libro de Compras.' },
       { nombre: 'Acuse / Reclamo (menú ⋮)', descripcion: 'Registra ante el SII la aceptación (ERM/ACD) o el RECLAMO (RCD) de la factura. El reclamo debe hacerse dentro de 8 días desde la recepción en el SII — pasado el plazo hay aceptación tácita.' }

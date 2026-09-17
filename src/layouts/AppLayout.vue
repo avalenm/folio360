@@ -50,6 +50,7 @@ const navGroups: { label: string | null; items: NavItem[] }[] = [
       { to: '/ordenes-compra', label: 'Órdenes de compra', icon: 'pi-clipboard', minRole: 'contador' },
       { to: '/purchases', label: 'Compras', icon: 'pi-shopping-cart', minRole: 'contador' },
       { to: '/facturas-recibidas', label: 'Facturas recibidas', icon: 'pi-inbox', minRole: 'contador' },
+      { to: '/nominas-pago', label: 'Nóminas de pago', icon: 'pi-money-bill', minRole: 'contador' },
       { to: '/suppliers', label: 'Proveedores', icon: 'pi-truck' }
     ]
   },

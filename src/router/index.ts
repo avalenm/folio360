@@ -62,6 +62,12 @@ const router = createRouter({
           meta: { minRole: 'contador' }
         },
         {
+          path: 'nominas-pago',
+          name: 'nominas-pago',
+          component: () => import('@/views/pagos/NominasPagoView.vue'),
+          meta: { minRole: 'contador' }
+        },
+        {
           path: 'casilla-intercambio',
           name: 'casilla-intercambio',
           component: () => import('@/views/settings/CasillaIntercambioView.vue'),

@@ -13,7 +13,10 @@ import { useConfirm } from 'primevue/useconfirm'
 import { useToast } from 'primevue/usetoast'
 import { useResource } from '@/composables/useResource'
 import { feathersClient } from '@/services/feathers'
-import type { Supplier, SituacionTributaria } from '@/types'
+import type { Supplier, SituacionTributaria, SupplierDatosBancarios, TipoCuentaBancaria } from '@/types'
+import Select from 'primevue/select'
+import Tag from 'primevue/tag'
+import { BANCOS, TIPOS_CUENTA, datosBancariosCompletos, nombreBanco } from '@/pagos'
 
 const { items, loading, fetchAll, create, update, remove } = useResource<Supplier>('suppliers')
 const confirm = useConfirm()
@@ -109,20 +112,58 @@ function emptyDraft(): Partial<Supplier> {
 
 const draft = reactive<Partial<Supplier>>(emptyDraft())
 
+// Datos de transferencia (para las nóminas de pago masivo). Se editan
+// aparte del draft porque son opcionales: sin banco, se guardan como null
+// y el server los borra.
+interface BancoDraft {
+  banco: string | null
+  tipoCuenta: TipoCuentaBancaria
+  numeroCuenta: string
+  rutTitular: string
+  nombreTitular: string
+  emailAviso: string
+}
+function emptyBancoDraft(): BancoDraft {
+  return { banco: null, tipoCuenta: 'corriente', numeroCuenta: '', rutTitular: '', nombreTitular: '', emailAviso: '' }
+}
+const bancoDraft = reactive<BancoDraft>(emptyBancoDraft())
+const opcionesBanco = BANCOS.map((b) => ({ label: b.nombre, value: b.codigo }))
+
+function datosBancariosDelDraft(): SupplierDatosBancarios | null {
+  if (!bancoDraft.banco) return null
+  return {
+    banco: bancoDraft.banco,
+    tipoCuenta: bancoDraft.tipoCuenta,
+    numeroCuenta: bancoDraft.numeroCuenta.replace(/\D/g, ''),
+    rutTitular: bancoDraft.rutTitular.trim() || undefined,
+    nombreTitular: bancoDraft.nombreTitular.trim() || undefined,
+    emailAviso: bancoDraft.emailAviso.trim() || undefined
+  }
+}
+
 function openCreate(): void {
   editingId.value = null
   Object.assign(draft, emptyDraft())
+  Object.assign(bancoDraft, emptyBancoDraft())
   dialogVisible.value = true
 }
 
 function openEdit(supplier: Supplier): void {
   editingId.value = supplier._id
   Object.assign(draft, supplier)
+  const d = supplier.datosBancarios
+  Object.assign(bancoDraft, emptyBancoDraft(), d ? { ...d, banco: d.banco, rutTitular: d.rutTitular ?? '', nombreTitular: d.nombreTitular ?? '', emailAviso: d.emailAviso ?? '' } : {})
   dialogVisible.value = true
 }
 
 async function handleSave(): Promise<void> {
   saving.value = true
+  if (bancoDraft.banco && !bancoDraft.numeroCuenta.replace(/\D/g, '')) {
+    toast.add({ severity: 'warn', summary: 'Falta el número de cuenta para la transferencia', life: 3000 })
+    saving.value = false
+    return
+  }
+  draft.datosBancarios = datosBancariosDelDraft()
   try {
     if (editingId.value) {
       await update(editingId.value, draft)
@@ -216,6 +257,14 @@ onMounted(fetchAll)
       </Column>
       <Column field="giro" header="Giro" />
       <Column field="email" header="Email" />
+      <Column header="Transferencia">
+        <template #body="{ data }">
+          <span v-if="datosBancariosCompletos(data)" class="muted" :title="`${nombreBanco(data.datosBancarios.banco)} · cuenta ${data.datosBancarios.numeroCuenta}`">
+            {{ nombreBanco(data.datosBancarios.banco) }}
+          </span>
+          <Tag v-else severity="secondary" value="Sin datos" title="Sin banco y cuenta no puede entrar a una nómina de pago" />
+        </template>
+      </Column>
       <Column header="" style="width: 3.5rem">
         <template #body="{ data }">
           <Button icon="pi pi-ellipsis-v" text @click="toggleRowMenu($event, data)" />
@@ -264,6 +313,37 @@ onMounted(fetchAll)
           <span>Email</span>
           <InputText v-model="draft.email" type="email" />
         </label>
+
+        <!-- Para las nóminas de pago masivo (Compras → Nómina de pago). -->
+        <fieldset class="banco">
+          <legend>Datos para transferencia</legend>
+          <label class="field">
+            <span>Banco</span>
+            <Select v-model="bancoDraft.banco" :options="opcionesBanco" option-label="label" option-value="value" placeholder="Sin datos bancarios" show-clear />
+          </label>
+          <template v-if="bancoDraft.banco">
+            <label class="field">
+              <span>Tipo de cuenta</span>
+              <Select v-model="bancoDraft.tipoCuenta" :options="TIPOS_CUENTA" option-label="label" option-value="value" />
+            </label>
+            <label class="field">
+              <span>Número de cuenta</span>
+              <InputText v-model="bancoDraft.numeroCuenta" inputmode="numeric" placeholder="Solo dígitos" />
+            </label>
+            <label class="field">
+              <span>RUT del titular</span>
+              <InputText v-model="bancoDraft.rutTitular" :placeholder="`${draft.rut || 'el del proveedor'} si se deja vacío`" />
+            </label>
+            <label class="field">
+              <span>Nombre del titular</span>
+              <InputText v-model="bancoDraft.nombreTitular" :placeholder="draft.razonSocial || 'la razón social si se deja vacío'" />
+            </label>
+            <label class="field">
+              <span>Correo de aviso de pago</span>
+              <InputText v-model="bancoDraft.emailAviso" type="email" :placeholder="draft.email || 'el email del proveedor si se deja vacío'" />
+            </label>
+          </template>
+        </fieldset>
 
         <div class="form-actions">
           <Button label="Cancelar" text @click="dialogVisible = false" />
@@ -354,4 +434,6 @@ onMounted(fetchAll)
   gap: 0.5rem;
   margin-top: 0.5rem;
 }
+.banco { border: 1px solid #e2e8f0; border-radius: 8px; padding: 0.5rem 0.9rem 0.8rem; margin: 0.25rem 0; display: grid; gap: 0.6rem; }
+.banco legend { font-size: 0.8rem; font-weight: 600; color: #475569; padding: 0 0.3rem; }
 </style>
