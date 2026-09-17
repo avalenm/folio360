@@ -18,9 +18,11 @@ import { useResource } from '@/composables/useResource'
 import { feathersClient } from '@/services/feathers'
 import type { IncomingInvoice, PurchaseAccionSii, SugerenciaOrdenCompra, Supplier } from '@/types'
 import {
+  acuseFueraDePlazo,
   acuseNoAplicaPorContado,
   acuseSinRegistroEnSii,
   EXPLICACION_DTE_CONTADO,
+  EXPLICACION_PLAZO_VENCIDO,
   EXPLICACION_SIN_REGISTRO_EN_SII,
   TIPOS_DTE_CON_ACUSE
 } from '@/types'
@@ -200,6 +202,13 @@ async function handleConfirm(): Promise<void> {
         summary: 'Compra registrada, pero el SII aún no tiene esta factura',
         detail: EXPLICACION_SIN_REGISTRO_EN_SII,
         life: 12000
+      })
+    } else if (result.acuse && acuseFueraDePlazo(result.acuse)) {
+      toast.add({
+        severity: 'info',
+        summary: 'Compra registrada. Ya había operado la aceptación tácita',
+        detail: EXPLICACION_PLAZO_VENCIDO,
+        life: 10000
       })
     } else if (result.acuse && acuseNoAplicaPorContado(result.acuse)) {
       toast.add({

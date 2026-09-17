@@ -31,9 +31,11 @@ import type {
   Supplier
 } from '@/types'
 import {
+  acuseFueraDePlazo,
   acuseNoAplicaPorContado,
   acuseSinRegistroEnSii,
   EXPLICACION_DTE_CONTADO,
+  EXPLICACION_PLAZO_VENCIDO,
   EXPLICACION_SIN_REGISTRO_EN_SII
 } from '@/types'
 
@@ -571,6 +573,8 @@ function confirmAcuse(): void {
             detail: EXPLICACION_SIN_REGISTRO_EN_SII,
             life: 12000
           })
+        } else if (acuseFueraDePlazo(r)) {
+          toast.add({ severity: 'info', summary: 'Ya operó la aceptación tácita', detail: EXPLICACION_PLAZO_VENCIDO, life: 10000 })
         } else if (acuseNoAplicaPorContado(r)) {
           toast.add({ severity: 'info', summary: 'Factura al contado: no lleva acuse', detail: EXPLICACION_DTE_CONTADO, life: 10000 })
         } else if (r.codResp !== 0) {
@@ -745,6 +749,12 @@ onMounted(async () => {
           />
           <!-- Código 27: DTE al contado o gratuito — el SII no admite eventos
                para esos, así que no es un rechazo ni algo pendiente. -->
+          <Tag
+            v-else-if="data.siiAcuse && acuseFueraDePlazo(data.siiAcuse)"
+            severity="secondary"
+            value="Aceptación tácita"
+            :title="EXPLICACION_PLAZO_VENCIDO"
+          />
           <Tag
             v-else-if="data.siiAcuse && acuseNoAplicaPorContado(data.siiAcuse)"
             severity="secondary"

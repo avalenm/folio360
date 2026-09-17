@@ -394,6 +394,18 @@ export function acuseNoAplicaPorContado(acuse: { codResp: number } | undefined |
   return acuse?.codResp === COD_RESP_DTE_CONTADO_SIN_EVENTOS
 }
 
+// codResp 8: "Pasados 8 dias despues de la recepcion no es posible
+// registrar reclamos o eventos": ya operó la aceptación tácita. El documento
+// está aceptado de pleno derecho; no hay nada que hacer.
+export const COD_RESP_PLAZO_VENCIDO = 8
+
+export function acuseFueraDePlazo(acuse: { codResp: number } | undefined | null): boolean {
+  return acuse?.codResp === COD_RESP_PLAZO_VENCIDO
+}
+
+export const EXPLICACION_PLAZO_VENCIDO =
+  'Pasaron más de 8 días desde que el SII recibió esta factura, así que ya operó la aceptación tácita: el documento está aceptado de pleno derecho y el SII no admite acuses ni reclamos. No hay nada más que hacer.'
+
 export const EXPLICACION_DTE_CONTADO =
   'Esta factura viene marcada como pagada al contado (o gratuita). Para esos documentos la ley no contempla acuse ni reclamo, y el SII rechaza cualquier acción. La compra queda registrada y no hay nada más que hacer ante el SII.'
 
