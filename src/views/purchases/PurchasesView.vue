@@ -26,9 +26,11 @@ import type {
   PurchaseAccionSii,
   PurchaseCodigoIvaNoRec,
   PurchaseTipoDocumento,
+  PurchaseSiiAcuse,
   PurchaseWrite,
   Supplier
 } from '@/types'
+import { acuseSinRegistroEnSii, EXPLICACION_SIN_REGISTRO_EN_SII } from '@/types'
 
 // La lista la pagina el SERVIDOR y los filtros viajan con la consulta: antes
 // se cargaban 100 compras y se filtraba sobre esas, así que buscar un folio
@@ -92,6 +94,12 @@ const accionSiiLabel: Record<PurchaseAccionSii, string> = {
 // de abajo lo refleja en el color independiente de si la llamada al SII en
 // sí misma tuvo éxito (codResp) — son dos cosas distintas.
 const ACCIONES_DISPUTA: PurchaseAccionSii[] = ['RCD', 'RFP', 'RFT']
+
+function tooltipSinRegistro(acuse: PurchaseSiiAcuse): string {
+  const intento = new Date(acuse.fecha).toLocaleString('es-CL', { dateStyle: 'short', timeStyle: 'short' })
+  const reintentos = acuse.reintentos ? ` Reintentos automáticos: ${acuse.reintentos}.` : ''
+  return `${EXPLICACION_SIN_REGISTRO_EN_SII} Último intento: ${intento}.${reintentos}`
+}
 
 const supplierOptions = computed(() => suppliers.value.map((s) => ({ label: s.razonSocial, value: s._id })))
 
@@ -544,12 +552,30 @@ function confirmAcuse(): void {
     accept: async () => {
       acuseSending.value = true
       try {
-        await feathersClient
+        const r = await feathersClient
           .service('purchases-acuse-recibo')
           .create({ purchaseId: purchase._id, accion: acuseAccion.value })
         await fetchAll()
         acuseVisible.value = false
-        toast.add({ severity: 'success', summary: 'Acción registrada ante el SII', life: 3000 })
+        // El servicio no lanza cuando el SII contesta con un código distinto
+        // de 0 — la llamada funcionó, es el SII el que no pudo registrar.
+        if (acuseSinRegistroEnSii(r)) {
+          toast.add({
+            severity: 'warn',
+            summary: 'El SII aún no tiene este documento',
+            detail: EXPLICACION_SIN_REGISTRO_EN_SII,
+            life: 12000
+          })
+        } else if (r.codResp !== 0) {
+          toast.add({
+            severity: 'warn',
+            summary: `El SII rechazó la acción (código ${r.codResp})`,
+            detail: r.descResp,
+            life: 8000
+          })
+        } else {
+          toast.add({ severity: 'success', summary: 'Acción registrada ante el SII', life: 3000 })
+        }
       } catch (e) {
         toast.add({
           severity: 'error',
@@ -700,15 +726,25 @@ onMounted(async () => {
 
       <Column header="Acuse SII">
         <template #body="{ data }">
+          <!-- Código 9: el SII no tiene el DTE. Antes se veía como "Aceptado"
+               en rojo, que no dice nada; ahora dice qué pasa y que se está
+               reintentando solo. -->
           <Tag
-            v-if="data.siiAcuse"
-            :severity="
-              data.siiAcuse.codResp !== 0
-                ? 'danger'
-                : ACCIONES_DISPUTA.includes(data.siiAcuse.accion as PurchaseAccionSii)
-                  ? 'warn'
-                  : 'success'
-            "
+            v-if="data.siiAcuse && acuseSinRegistroEnSii(data.siiAcuse)"
+            severity="warn"
+            icon="pi pi-clock"
+            value="Sin registro en SII"
+            :title="tooltipSinRegistro(data.siiAcuse)"
+          />
+          <Tag
+            v-else-if="data.siiAcuse && data.siiAcuse.codResp !== 0"
+            severity="danger"
+            :value="`Rechazado por el SII (${data.siiAcuse.codResp})`"
+            :title="data.siiAcuse.descResp"
+          />
+          <Tag
+            v-else-if="data.siiAcuse"
+            :severity="ACCIONES_DISPUTA.includes(data.siiAcuse.accion as PurchaseAccionSii) ? 'warn' : 'success'"
             :value="accionSiiLabel[data.siiAcuse.accion as PurchaseAccionSii]"
             :title="data.siiAcuse.descResp"
           />

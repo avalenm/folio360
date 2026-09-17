@@ -8,6 +8,7 @@ import { useToast } from 'primevue/usetoast'
 import { feathersClient } from '@/services/feathers'
 import { useAuthStore } from '@/stores/auth'
 import type { DteDocument, IncomingInvoice, Paginated, Purchase, Supplier } from '@/types'
+import { acuseSinRegistroEnSii, EXPLICACION_SIN_REGISTRO_EN_SII } from '@/types'
 import { formatMonto, type ResumenCuentas } from '@/cuentas'
 
 const auth = useAuthStore()
@@ -148,9 +149,22 @@ function confirmRecepcionar(purchase: Purchase): void {
     accept: async () => {
       recepcionandoId.value = purchase._id
       try {
-        await feathersClient.service('purchases-acuse-recibo').create({ purchaseId: purchase._id, accion: 'ACD' })
+        const r = await feathersClient.service('purchases-acuse-recibo').create({ purchaseId: purchase._id, accion: 'ACD' })
         await refreshPurchases()
-        toast.add({ severity: 'success', summary: 'Factura recepcionada ante el SII', life: 3000 })
+        // Mismo criterio que PurchasesView: codResp distinto de 0 no lanza,
+        // es el SII el que no pudo registrar (9 = todavía no tiene el DTE).
+        if (acuseSinRegistroEnSii(r)) {
+          toast.add({
+            severity: 'warn',
+            summary: 'El SII aún no tiene esta factura',
+            detail: EXPLICACION_SIN_REGISTRO_EN_SII,
+            life: 12000
+          })
+        } else if (r.codResp !== 0) {
+          toast.add({ severity: 'warn', summary: `El SII rechazó el acuse (código ${r.codResp})`, detail: r.descResp, life: 8000 })
+        } else {
+          toast.add({ severity: 'success', summary: 'Factura recepcionada ante el SII', life: 3000 })
+        }
       } catch (e) {
         toast.add({
           severity: 'error',

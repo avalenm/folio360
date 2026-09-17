@@ -362,10 +362,27 @@ export type PurchaseAccionSii = 'ERM' | 'ACD' | 'RCD' | 'RFP' | 'RFT'
 
 export interface PurchaseSiiAcuse {
   accion: PurchaseAccionSii
+  // Último intento (manual o del reintento automático del worker).
   fecha: string
   codResp: number
   descResp: string
+  // Reintentos automáticos acumulados mientras el SII responde 9.
+  reintentos?: number
 }
+
+// codResp con que el SII dice "no existen registros": el proveedor emitió
+// el DTE pero no lo envió al SII (o el SII lo rechazó). No es un error
+// nuestro; el worker reintenta el acuse cada hora hasta 90 días. Espejo de
+// COD_RESP_SIN_REGISTRO_EN_SII en server/services/purchases/registrar-acuse.ts.
+export const COD_RESP_SIN_REGISTRO_EN_SII = 9
+
+export function acuseSinRegistroEnSii(acuse: { codResp: number } | undefined | null): boolean {
+  return acuse?.codResp === COD_RESP_SIN_REGISTRO_EN_SII
+}
+
+// Texto único para explicar el codResp 9 en cualquier pantalla.
+export const EXPLICACION_SIN_REGISTRO_EN_SII =
+  'El SII todavía no tiene este documento: el proveedor no lo ha enviado al SII o el SII lo rechazó. Pídele al proveedor que lo regularice. Folio360 reintentará el acuse cada hora, sin que tengas que hacer nada.'
 
 // Motivos por los que el IVA de una compra no da derecho a crédito fiscal
 // (tabla <IVANoRec> del Formato IECV).

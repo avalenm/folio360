@@ -17,6 +17,7 @@ import { useToast } from 'primevue/usetoast'
 import { useResource } from '@/composables/useResource'
 import { feathersClient } from '@/services/feathers'
 import type { IncomingInvoice, PurchaseAccionSii, SugerenciaOrdenCompra, Supplier } from '@/types'
+import { acuseSinRegistroEnSii, EXPLICACION_SIN_REGISTRO_EN_SII } from '@/types'
 
 const { items: incoming, loading, fetchAll, remove } = useResource<IncomingInvoice>('incoming-invoices')
 const { items: suppliers, fetchAll: fetchSuppliers } = useResource<Supplier>('suppliers')
@@ -184,6 +185,22 @@ async function handleConfirm(): Promise<void> {
         summary: 'Compra registrada, pero el aviso al SII falló',
         detail: result.acuseError,
         life: 6000
+      })
+    } else if (result.acuse && acuseSinRegistroEnSii(result.acuse)) {
+      // El SII contestó, pero no tiene el DTE (código 9). Antes esto se
+      // guardaba en silencio y la pantalla decía "aceptación informada".
+      toast.add({
+        severity: 'warn',
+        summary: 'Compra registrada, pero el SII aún no tiene esta factura',
+        detail: EXPLICACION_SIN_REGISTRO_EN_SII,
+        life: 12000
+      })
+    } else if (result.acuse && result.acuse.codResp !== 0) {
+      toast.add({
+        severity: 'warn',
+        summary: `Compra registrada, pero el SII rechazó el acuse (código ${result.acuse.codResp})`,
+        detail: result.acuse.descResp,
+        life: 8000
       })
     } else if (confirmAccionMeta.value?.disputa) {
       toast.add({ severity: 'warn', summary: 'Compra registrada como disputada, reclamo informado al SII', life: 3500 })
