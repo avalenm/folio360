@@ -149,6 +149,8 @@ export interface ResumenCuentas {
     factorProporcionalidad: number
     ivaSinDerechoACredito: number
     ingresosBrutos: number
+    // Compras del mes sin IVA (neto + exento), comparable con el RCV.
+    comprasNetas: number
   }
   evolucion: { mes: string; ventas: number; compras: number; margen: number }[]
   posicionNeta: number

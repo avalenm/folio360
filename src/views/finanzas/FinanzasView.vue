@@ -152,10 +152,11 @@ interface FilaCruce {
   nota?: string
 }
 
-// Compras y ventas NETAS y sus IVA: los cuatro números que deciden el F29.
-// Folio360 suma por fecha de emisión; el SII, en compras, por período de
-// recepción — una factura de fin de mes recibida al mes siguiente explica
-// una diferencia sin que falte nada.
+// Compras y ventas NETAS (sin IVA: neto + exento, como las muestra el RCV y
+// como van las tarjetas de arriba) y sus IVA: los cuatro números que deciden
+// el F29. Folio360 suma por fecha de emisión; el SII, en compras, por
+// período de recepción — una factura de fin de mes recibida al mes siguiente
+// explica una diferencia sin que falte nada.
 const cruceSii = computed<FilaCruce[]>(() => {
   const t = rcv.value?.totales
   if (!t) return []
@@ -198,6 +199,7 @@ const AYUDA_FINANZAS: SeccionAyuda[] = [
   {
     titulo: 'Cómo se calcula',
     items: [
+      { nombre: 'Ventas, compras y margen', descripcion: 'Siempre SIN IVA (neto + exento): el IVA no es ingreso ni costo, solo pasa por la caja. Son las mismas cifras que el SII muestra en el Registro de Compras y Ventas, por eso se pueden cruzar en el panel "Según el SII".' },
       { nombre: 'Selector de mes', descripcion: 'Las tarjetas del período (ventas, compras, margen, IVA) se pueden ver para cualquiera de los últimos 12 meses. El resto de la página (por cobrar/pagar, aging, posición neta) siempre es la foto de HOY: lo pendiente no tiene "mes".' },
       { nombre: 'Vencimientos', descripcion: 'Fecha de emisión + plazo pactado del cliente (ficha del cliente); sin pacto rigen los 30 días de la Ley 21.131. "Por vencer" es deuda sana; los tramos vencidos son la que hay que cobrar.' },
       { nombre: 'Notas de crédito', descripcion: 'Rebajan el saldo de la factura que referencian, no cuentan como línea aparte.' },
@@ -248,20 +250,23 @@ onMounted(async () => {
         />
       </div>
       <div class="tarjetas" :class="{ atenuado: cambiandoMes }">
+        <!-- Todo sin IVA (neto + exento): el IVA no es ingreso ni costo, y
+             así calza con lo que el SII muestra en el RCV. Antes estas
+             tarjetas decían "netas" pero sumaban el total con IVA. -->
         <div class="tarjeta">
           <span class="etiqueta">Ventas netas</span>
           <span class="valor">${{ fm(mesActual.ventas) }}</span>
-          <span class="detalle">{{ esMesEnCurso ? 'mes en curso' : nombreMesLargo(mesActual.mes).toLowerCase() }}, por fecha de emisión</span>
+          <span class="detalle">sin IVA · {{ esMesEnCurso ? 'mes en curso' : nombreMesLargo(mesActual.mes).toLowerCase() }}, por fecha de emisión</span>
         </div>
         <div class="tarjeta">
-          <span class="etiqueta">Compras</span>
+          <span class="etiqueta">Compras netas</span>
           <span class="valor">${{ fm(mesActual.compras) }}</span>
-          <span class="detalle">{{ esMesEnCurso ? 'mes en curso' : nombreMesLargo(mesActual.mes).toLowerCase() }}</span>
+          <span class="detalle">sin IVA · {{ esMesEnCurso ? 'mes en curso' : nombreMesLargo(mesActual.mes).toLowerCase() }}</span>
         </div>
         <div class="tarjeta">
           <span class="etiqueta">Margen</span>
           <span class="valor" :class="mesActual.margen >= 0 ? 'positivo' : 'negativo'">${{ fm(mesActual.margen) }}</span>
-          <span class="detalle">ventas − compras</span>
+          <span class="detalle">ventas netas − compras netas</span>
         </div>
         <div class="tarjeta">
           <span class="etiqueta">{{ esMesEnCurso ? 'IVA estimado del mes' : `IVA estimado de ${nombreMesLargo(mesActual.mes).toLowerCase()}` }}</span>
