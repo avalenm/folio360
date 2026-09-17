@@ -1,5 +1,13 @@
-import type { Purchase, PurchaseSiiRcv } from '@/types'
-import { EXPLICACION_DTE_CONTADO, EXPLICACION_PLAZO_VENCIDO } from '@/types'
+import type { Purchase, PurchaseAccionSii, PurchaseSiiRcv } from '@/types'
+import { acuseRegistrado, EXPLICACION_DTE_CONTADO, EXPLICACION_PLAZO_VENCIDO } from '@/types'
+
+const NOMBRE_ACCION: Record<PurchaseAccionSii, string> = {
+  ACD: 'Aceptado',
+  RCD: 'Reclamado',
+  ERM: 'Acuse de recibo',
+  RFP: 'Reclamo falta parcial',
+  RFT: 'Reclamo falta total'
+}
 
 // Estados derivados de una compra para la tabla de Compras: qué dice el SII
 // del acuse, cuán vencida está la deuda y si la clasificación tributaria del
@@ -60,6 +68,21 @@ export function acuseSegunSii(purchase: Purchase): EstadoTag | null {
       value: leyenda,
       severity: esReclamo ? 'warn' : 'success',
       title: `Registrado en el SII${cuando ? ` el ${fechaHora(cuando)}` : ''}.${recibida}`
+    }
+  }
+
+  // Sin evento en el RCV, pero el webservice de acuse ya dijo OK (o "evento
+  // registrado previamente"): el Registro de Compras tarda en reflejar los
+  // eventos (visto 2026-09-17: la 5688 aceptada seguía "PENDIENTE" sin
+  // evento media hora después). Manda lo que el SII confirmó por el otro
+  // canal.
+  const a = purchase.siiAcuse
+  if (a && acuseRegistrado(a)) {
+    const esReclamo = a.accion !== 'ACD' && a.accion !== 'ERM'
+    return {
+      value: NOMBRE_ACCION[a.accion],
+      severity: esReclamo ? 'warn' : 'success',
+      title: `Registrado ante el SII el ${fechaHora(a.fecha)}${a.codResp === 7 ? ' (el SII ya lo tenía)' : ''}. El Registro de Compras aún no lo refleja; se actualiza con la próxima sincronización.${recibida}`
     }
   }
 

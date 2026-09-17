@@ -394,6 +394,16 @@ export function acuseNoAplicaPorContado(acuse: { codResp: number } | undefined |
   return acuse?.codResp === COD_RESP_DTE_CONTADO_SIN_EVENTOS
 }
 
+// codResp 7: "Evento registrado previamente": el SII ya tenía ese acuse o
+// reclamo (hecho antes desde Folio360, sii.cl u otro sistema). Es un éxito,
+// no un rechazo.
+export const COD_RESP_EVENTO_PREVIO = 7
+
+// El acuse quedó registrado en el SII: respondió OK o que ya lo tenía.
+export function acuseRegistrado(acuse: { codResp: number } | undefined | null): boolean {
+  return acuse?.codResp === 0 || acuse?.codResp === COD_RESP_EVENTO_PREVIO
+}
+
 // codResp 8: "Pasados 8 dias despues de la recepcion no es posible
 // registrar reclamos o eventos": ya operó la aceptación tácita. El documento
 // está aceptado de pleno derecho; no hay nada que hacer.

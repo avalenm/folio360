@@ -21,6 +21,7 @@ import {
   acuseFueraDePlazo,
   acuseNoAplicaPorContado,
   acuseSinRegistroEnSii,
+  COD_RESP_EVENTO_PREVIO,
   EXPLICACION_DTE_CONTADO,
   EXPLICACION_PLAZO_VENCIDO,
   EXPLICACION_SIN_REGISTRO_EN_SII,
@@ -218,6 +219,8 @@ async function handleConfirm(): Promise<void> {
         detail: EXPLICACION_DTE_CONTADO,
         life: 10000
       })
+    } else if (result.acuse && result.acuse.codResp === COD_RESP_EVENTO_PREVIO) {
+      toast.add({ severity: 'success', summary: 'Compra registrada. El SII ya tenía esta acción registrada', life: 4000 })
     } else if (result.acuse && result.acuse.codResp !== 0) {
       toast.add({
         severity: 'warn',

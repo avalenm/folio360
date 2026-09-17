@@ -34,6 +34,7 @@ import {
   acuseFueraDePlazo,
   acuseNoAplicaPorContado,
   acuseSinRegistroEnSii,
+  COD_RESP_EVENTO_PREVIO,
   EXPLICACION_DTE_CONTADO,
   EXPLICACION_PLAZO_VENCIDO,
   EXPLICACION_SIN_REGISTRO_EN_SII
@@ -589,6 +590,8 @@ function confirmAcuse(): void {
           toast.add({ severity: 'info', summary: 'Ya operó la aceptación tácita', detail: EXPLICACION_PLAZO_VENCIDO, life: 10000 })
         } else if (acuseNoAplicaPorContado(r)) {
           toast.add({ severity: 'info', summary: 'Factura al contado: no lleva acuse', detail: EXPLICACION_DTE_CONTADO, life: 10000 })
+        } else if (r.codResp === COD_RESP_EVENTO_PREVIO) {
+          toast.add({ severity: 'success', summary: 'El SII ya tenía registrada esta acción', detail: r.descResp, life: 4000 })
         } else if (r.codResp !== 0) {
           toast.add({
             severity: 'warn',
@@ -796,7 +799,7 @@ onMounted(async () => {
             :title="EXPLICACION_DTE_CONTADO"
           />
           <Tag
-            v-else-if="data.siiAcuse && data.siiAcuse.codResp !== 0"
+            v-else-if="data.siiAcuse && data.siiAcuse.codResp !== 0 && data.siiAcuse.codResp !== COD_RESP_EVENTO_PREVIO"
             severity="danger"
             :value="`Rechazado por el SII (${data.siiAcuse.codResp})`"
             :title="data.siiAcuse.descResp"

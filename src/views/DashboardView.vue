@@ -13,6 +13,7 @@ import {
   acuseFueraDePlazo,
   acuseNoAplicaPorContado,
   acuseSinRegistroEnSii,
+  COD_RESP_EVENTO_PREVIO,
   EXPLICACION_DTE_CONTADO,
   EXPLICACION_PLAZO_VENCIDO,
   EXPLICACION_SIN_REGISTRO_EN_SII
@@ -172,6 +173,8 @@ function confirmRecepcionar(purchase: Purchase): void {
           toast.add({ severity: 'info', summary: 'Ya operó la aceptación tácita', detail: EXPLICACION_PLAZO_VENCIDO, life: 10000 })
         } else if (acuseNoAplicaPorContado(r)) {
           toast.add({ severity: 'info', summary: 'Factura al contado: no lleva acuse', detail: EXPLICACION_DTE_CONTADO, life: 10000 })
+        } else if (r.codResp === COD_RESP_EVENTO_PREVIO) {
+          toast.add({ severity: 'success', summary: 'El SII ya tenía registrada la aceptación', detail: r.descResp, life: 4000 })
         } else if (r.codResp !== 0) {
           toast.add({ severity: 'warn', summary: `El SII rechazó el acuse (código ${r.codResp})`, detail: r.descResp, life: 8000 })
         } else {
