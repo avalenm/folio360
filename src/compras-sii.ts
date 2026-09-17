@@ -23,6 +23,17 @@ const PLAZO_RECLAMO_DIAS = 8
 // mismo criterio que el server (services/cuentas/calculo.ts).
 export const PLAZO_LEGAL_DIAS = 30
 
+// Fecha SIN hora (emisión, vencimiento): en la base viven como medianoche
+// UTC (así salen del XML y del RCV), y formatearlas con la zona del
+// navegador las corre un día hacia atrás en Chile (UTC−3/−4): la 5678 del
+// 31-07 se veía "30-07-2026". Se formatean en UTC para que muestren el día
+// que son. Las que vienen del selector de fecha (medianoche local = 03:00Z)
+// caen en el mismo día también.
+export function fechaCorta(valor: string | Date | undefined | null): string {
+  if (!valor) return '—'
+  return new Date(valor).toLocaleDateString('es-CL', { timeZone: 'UTC' })
+}
+
 function fechaHora(iso: string): string {
   return new Date(iso).toLocaleString('es-CL', { dateStyle: 'short', timeStyle: 'short' })
 }
@@ -86,7 +97,7 @@ export function estadoVencimiento(purchase: Purchase, ahora: Date = new Date()):
   const venc = vencimientoDe(purchase)
   const dias = Math.floor((ahora.getTime() - venc.getTime()) / DIA_MS)
   const origen = purchase.fechaVencimiento ? 'vencimiento del documento' : `emisión + ${PLAZO_LEGAL_DIAS} días (plazo legal)`
-  const title = `Vence el ${venc.toLocaleDateString('es-CL')} (${origen}).`
+  const title = `Vence el ${fechaCorta(venc)} (${origen}).`
 
   if (dias < 0) return { value: `Vence en ${-dias} día${dias === -1 ? '' : 's'}`, severity: 'info', title }
   if (dias === 0) return { value: 'Vence hoy', severity: 'warn', title }

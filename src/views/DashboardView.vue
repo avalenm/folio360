@@ -8,6 +8,7 @@ import { useToast } from 'primevue/usetoast'
 import { feathersClient } from '@/services/feathers'
 import { useAuthStore } from '@/stores/auth'
 import type { DteDocument, IncomingInvoice, Paginated, Purchase, Supplier } from '@/types'
+import { fechaCorta } from '@/compras-sii'
 import {
   acuseFueraDePlazo,
   acuseNoAplicaPorContado,
@@ -400,7 +401,7 @@ onUnmounted(() => {
             <span class="recibida-proveedor">{{ factura.emisorRazonSocial ?? factura.emisorRut }}</span>
             <span class="recibida-sub">
               {{ tipoDteLabel[factura.tipoDte] ?? `Tipo ${factura.tipoDte}` }} folio {{ factura.folio }} ·
-              {{ new Date(factura.fechaEmision).toLocaleDateString('es-CL') }}
+              {{ fechaCorta(factura.fechaEmision) }}
             </span>
           </span>
           <span class="recibida-monto">{{ formatCurrency(factura.montoTotal) }}</span>
@@ -427,7 +428,7 @@ onUnmounted(() => {
           <span class="recibida-meta">
             <span class="recibida-proveedor">{{ supplierName(factura.supplierId) }}</span>
             <span class="recibida-sub">
-              Folio {{ factura.folio }} · {{ new Date(factura.fecha).toLocaleDateString('es-CL') }}
+              Folio {{ factura.folio }} · {{ fechaCorta(factura.fecha) }}
             </span>
           </span>
           <span class="recibida-monto">{{ formatCurrency(factura.montoTotal) }}</span>

@@ -38,7 +38,7 @@ import {
   EXPLICACION_PLAZO_VENCIDO,
   EXPLICACION_SIN_REGISTRO_EN_SII
 } from '@/types'
-import { acuseSegunSii, discrepanciaClasificacion, estadoVencimiento, vencimientoDe } from '@/compras-sii'
+import { acuseSegunSii, discrepanciaClasificacion, estadoVencimiento, fechaCorta, vencimientoDe } from '@/compras-sii'
 
 // La lista la pagina el SERVIDOR y los filtros viajan con la consulta: antes
 // se cargaban 100 compras y se filtraba sobre esas, así que buscar un folio
@@ -727,7 +727,7 @@ onMounted(async () => {
       </Column>
 
       <Column header="Fecha">
-        <template #body="{ data }">{{ new Date(data.fecha).toLocaleDateString('es-CL') }}</template>
+        <template #body="{ data }">{{ fechaCorta(data.fecha) }}</template>
       </Column>
 
       <!-- Antigüedad de la deuda por fila (Finanzas tiene el agregado). -->
@@ -735,7 +735,7 @@ onMounted(async () => {
         <template #body="{ data }">
           <div v-if="estadoVencimiento(data)" class="stacked-cell">
             <Tag :severity="estadoVencimiento(data)!.severity" :value="estadoVencimiento(data)!.value" :title="estadoVencimiento(data)!.title" />
-            <span v-if="saldoDe(data) > 0" class="muted">{{ vencimientoDe(data).toLocaleDateString('es-CL') }}</span>
+            <span v-if="saldoDe(data) > 0" class="muted">{{ fechaCorta(vencimientoDe(data)) }}</span>
           </div>
           <span v-else class="muted">—</span>
         </template>

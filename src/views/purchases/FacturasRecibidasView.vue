@@ -26,6 +26,7 @@ import {
   EXPLICACION_SIN_REGISTRO_EN_SII,
   TIPOS_DTE_CON_ACUSE
 } from '@/types'
+import { fechaCorta } from '@/compras-sii'
 
 const { items: incoming, loading, fetchAll, remove } = useResource<IncomingInvoice>('incoming-invoices')
 const { items: suppliers, fetchAll: fetchSuppliers } = useResource<Supplier>('suppliers')
@@ -389,7 +390,7 @@ onMounted(async () => {
       <Column header="Fecha emisión">
         <template #body="{ data }">
           <div class="stacked-cell">
-            <span>{{ new Date(data.fechaEmision).toLocaleDateString('es-CL') }}</span>
+            <span>{{ fechaCorta(data.fechaEmision) }}</span>
             <span v-if="data.origen === 'rcv'" class="muted">Detectada en el RCV</span>
           </div>
         </template>
