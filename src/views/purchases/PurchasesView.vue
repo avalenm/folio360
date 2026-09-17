@@ -83,6 +83,16 @@ const tipoDocumentoLabel = NOMBRE_TIPO_COMPRA
 // tipoDte desde el XML; las anteriores y las manuales se infieren por los
 // montos, igual que hace el server para el acuse (tipoDteDeCompra): una
 // factura sin neto ni IVA y con exento solo puede ser exenta.
+// "MM-AAAA" del período del SII cuando no coincide con el mes de emisión.
+function periodoSiiDistinto(p: Purchase): string | null {
+  const periodo = p.siiRcv?.periodo
+  if (!periodo) return null
+  const f = new Date(p.fecha)
+  const emision = `${f.getUTCFullYear()}${String(f.getUTCMonth() + 1).padStart(2, '0')}`
+  if (periodo === emision) return null
+  return `${periodo.slice(4)}-${periodo.slice(0, 4)}`
+}
+
 function nombreDocumento(p: Purchase): string {
   if (p.tipoDocumento !== 'factura') return tipoDocumentoLabel[p.tipoDocumento]
   const exenta = p.tipoDte === 34 || (p.tipoDte === undefined && p.montoNeto === 0 && p.montoIva === 0 && p.montoExento > 0)
@@ -730,7 +740,17 @@ onMounted(async () => {
       </Column>
 
       <Column header="Fecha">
-        <template #body="{ data }">{{ fechaCorta(data.fecha) }}</template>
+        <template #body="{ data }">
+          <div class="stacked-cell">
+            <span>{{ fechaCorta(data.fecha) }}</span>
+            <!-- El SII asigna la compra al mes en que la recibió; si no es el
+                 de emisión, se dice, porque es el mes en que cuenta para el
+                 F29 y para Finanzas. -->
+            <span v-if="periodoSiiDistinto(data)" class="muted" :title="`El SII la recibió en otro mes: cuenta en ${periodoSiiDistinto(data)} para el F29 y en Finanzas`">
+              SII: {{ periodoSiiDistinto(data) }}
+            </span>
+          </div>
+        </template>
       </Column>
 
       <!-- Antigüedad de la deuda por fila (Finanzas tiene el agregado). -->

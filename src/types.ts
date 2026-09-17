@@ -514,8 +514,23 @@ export interface RcvResumenRow {
   montoTotal: number
 }
 
+// Documento que está en un lado y no en el otro en el mes: explica una
+// diferencia entre Folio360 y el SII.
+export interface RcvDiferencia {
+  lado: 'sii' | 'folio360'
+  operacion: 'compra' | 'venta'
+  tipoDte: number
+  folio: number
+  rut: string
+  razonSocial?: string
+  monto: number
+  fechaEmision?: string
+  nota: string
+}
+
 export interface RcvResumen {
   periodo: string
+  diferencias: RcvDiferencia[]
   ventas: RcvResumenRow[]
   compras: RcvResumenRow[]
   comprasPendientes: RcvResumenRow[]

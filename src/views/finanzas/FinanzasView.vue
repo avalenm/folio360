@@ -13,6 +13,7 @@ import {
   type ResumenCuentas
 } from '@/cuentas'
 import type { RcvResumen } from '@/types'
+import { fechaCorta } from '@/compras-sii'
 
 // Tablero financiero: evolución mensual, cuentas por cobrar y por pagar con
 // antigüedad POR VENCIMIENTO (no por emisión: una factura a 30 días emitida
@@ -179,6 +180,18 @@ function fm(valor: number): string {
   return valor.toLocaleString('es-CL')
 }
 
+const NOMBRE_TIPO_DTE: Record<number, string> = {
+  33: 'Factura',
+  34: 'Factura exenta',
+  52: 'Guía',
+  56: 'Nota de débito',
+  61: 'Nota de crédito'
+}
+
+function nombreTipoDte(tipo: number): string {
+  return NOMBRE_TIPO_DTE[tipo] ?? `Tipo ${tipo}`
+}
+
 function nombreMes(clave: string): string {
   const [a, m] = clave.split('-')
   return `${['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'][Number(m) - 1]} ${a.slice(2)}`
@@ -200,6 +213,7 @@ const AYUDA_FINANZAS: SeccionAyuda[] = [
     titulo: 'Cómo se calcula',
     items: [
       { nombre: 'Ventas, compras y margen', descripcion: 'Siempre SIN IVA (neto + exento): el IVA no es ingreso ni costo, solo pasa por la caja. Son las mismas cifras que el SII muestra en el Registro de Compras y Ventas, por eso se pueden cruzar en el panel "Según el SII".' },
+      { nombre: 'Mes de cada compra', descripcion: 'Una compra cuenta en el mes en que el SII la RECIBIÓ (el período de su Registro de Compras), no en el de su fecha de emisión: ahí nace el crédito fiscal y ahí la pone el SII en la propuesta del F29. Un proveedor que emite el 31 y envía al SII dos semanas después queda en el mes siguiente. Si Folio360 aún no tiene el dato del SII (compra manual o sin sincronizar), se usa la fecha de emisión.' },
       { nombre: 'Selector de mes', descripcion: 'Las tarjetas del período (ventas, compras, margen, IVA) se pueden ver para cualquiera de los últimos 12 meses. El resto de la página (por cobrar/pagar, aging, posición neta) siempre es la foto de HOY: lo pendiente no tiene "mes".' },
       { nombre: 'Vencimientos', descripcion: 'Fecha de emisión + plazo pactado del cliente (ficha del cliente); sin pacto rigen los 30 días de la Ley 21.131. "Por vencer" es deuda sana; los tramos vencidos son la que hay que cobrar.' },
       { nombre: 'Notas de crédito', descripcion: 'Rebajan el saldo de la factura que referencian, no cuentan como línea aparte.' },
@@ -297,7 +311,8 @@ onMounted(async () => {
         </div>
         <p class="detalle">
           Lo que el SII tiene registrado y con lo que arma la propuesta del F29, frente a lo registrado en Folio360.
-          Una diferencia significa que falta o sobra un documento, o que está en otro mes: el SII asigna las compras al mes en que las recibió.
+          Las compras se asignan al mes en que el SII las recibió, igual que en el F29, aunque la fecha de emisión sea otra.
+          Una diferencia significa que falta o sobra un documento en alguno de los dos lados; abajo se listan.
         </p>
         <p v-if="rcvError" class="vacio">No se pudo consultar el SII: {{ rcvError }}</p>
         <template v-else-if="rcv">
@@ -316,6 +331,22 @@ onMounted(async () => {
               </tr>
             </tbody>
           </table>
+          <template v-if="rcv.diferencias.length > 0">
+            <h3>Documentos que explican la diferencia</h3>
+            <table class="tabla-ranking">
+              <thead>
+                <tr><th>Documento</th><th>Contraparte</th><th class="num">Monto sin IVA</th><th>Dónde está</th></tr>
+              </thead>
+              <tbody>
+                <tr v-for="d in rcv.diferencias" :key="`${d.lado}-${d.operacion}-${d.tipoDte}-${d.folio}`">
+                  <td>{{ d.operacion === 'compra' ? 'Compra' : 'Venta' }} · {{ nombreTipoDte(d.tipoDte) }} {{ d.folio }}<span v-if="d.fechaEmision" class="detalle"> · emitida {{ fechaCorta(d.fechaEmision) }}</span></td>
+                  <td>{{ d.razonSocial ?? d.rut }}</td>
+                  <td class="num">${{ fm(d.monto) }}</td>
+                  <td><strong>{{ d.lado === 'sii' ? 'Solo en el SII' : 'Solo en Folio360' }}</strong><span class="detalle"> · {{ d.nota }}</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </template>
           <p class="detalle">
             En el SII: {{ rcv.totales.documentosVentas }} documento(s) de venta y {{ rcv.totales.documentosCompras }} de compra en el registro.
             <template v-if="rcv.totales.documentosComprasPendientes > 0">
