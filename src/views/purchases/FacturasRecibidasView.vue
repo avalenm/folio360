@@ -332,7 +332,7 @@ async function buscarEnRcv(): Promise<void> {
         result.nuevas > 0
           ? `${result.nuevas} factura(s) del RCV que no habían llegado por correo`
           : 'RCV revisado — nada nuevo',
-      detail: `${result.revisados} documento(s) revisados en el registro del SII`,
+      detail: `${result.revisados} documento(s) revisados en el registro del SII${result.actualizadas > 0 ? `; ${result.actualizadas} compra(s) con estado actualizado según el SII` : ''}`,
       life: 4000
     })
   } catch (e) {
@@ -397,7 +397,12 @@ onMounted(async () => {
 
       <Column header="Plazo de reclamo">
         <template #body="{ data }">
-          <Tag v-if="TIPOS_DTE_CON_ACUSE.includes(data.tipoDte)" :severity="plazoTag(data).severity" :value="plazoTag(data).value" />
+          <Tag
+            v-if="TIPOS_DTE_CON_ACUSE.includes(data.tipoDte)"
+            :severity="plazoTag(data).severity"
+            :value="plazoTag(data).value"
+            :title="`Recibida ${data.origen === 'rcv' ? 'por el SII' : 'en la casilla'} el ${new Date(data.recibidoEn).toLocaleString('es-CL', { dateStyle: 'short', timeStyle: 'short' })}`"
+          />
           <span v-else class="muted">No aplica</span>
         </template>
       </Column>

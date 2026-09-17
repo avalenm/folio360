@@ -2,6 +2,7 @@
 import AyudaPagina from '@/components/AyudaPagina.vue'
 import { computed, onMounted, ref } from 'vue'
 import Select from 'primevue/select'
+import Button from 'primevue/button'
 import { feathersClient } from '@/services/feathers'
 import { useAuthStore } from '@/stores/auth'
 import type { SeccionAyuda } from '@/components/AyudaPagina.vue'
@@ -11,6 +12,7 @@ import {
   formatMonto,
   type ResumenCuentas
 } from '@/cuentas'
+import type { RcvResumen } from '@/types'
 
 // Tablero financiero: evolución mensual, cuentas por cobrar y por pagar con
 // antigüedad POR VENCIMIENTO (no por emisión: una factura a 30 días emitida
@@ -109,6 +111,7 @@ async function cambiarMes(): Promise<void> {
   } finally {
     cambiandoMes.value = false
   }
+  void cargarRcv()
 }
 
 // Ventas/compras/margen del mes elegido salen de la evolución (que siempre
@@ -117,6 +120,59 @@ const mesActual = computed(() => {
   const porClave = evolucion.value.find((m) => m.mes === mesSeleccionado.value)
   return porClave ?? evolucion.value[evolucion.value.length - 1]
 })
+
+// ---- Según el SII: el RCV del mes, cruzado con lo de Folio360 ----
+// El SII arma la propuesta del F29 con su Registro de Compras y Ventas. Si
+// los totales de acá no calzan con los del SII, falta o sobra un documento
+// (o está mal clasificado) y conviene saberlo ANTES de declarar. Solo en
+// producción: certificación no tiene RCV.
+const rcv = ref<RcvResumen | null>(null)
+const rcvCargando = ref(false)
+const rcvError = ref<string | null>(null)
+const enProduccion = computed(() => auth.currentOrganization?.ambiente === 'produccion')
+
+async function cargarRcv(): Promise<void> {
+  if (!enProduccion.value || !mesActual.value) return
+  rcvCargando.value = true
+  rcvError.value = null
+  try {
+    rcv.value = (await feathersClient.service('rcv-resumen').find({ query: { mes: mesActual.value.mes } })) as RcvResumen
+  } catch (e) {
+    rcv.value = null
+    rcvError.value = e instanceof Error ? e.message : 'No se pudo consultar el SII'
+  } finally {
+    rcvCargando.value = false
+  }
+}
+
+interface FilaCruce {
+  concepto: string
+  folio360: number
+  sii: number
+  nota?: string
+}
+
+// Compras y ventas NETAS y sus IVA: los cuatro números que deciden el F29.
+// Folio360 suma por fecha de emisión; el SII, en compras, por período de
+// recepción — una factura de fin de mes recibida al mes siguiente explica
+// una diferencia sin que falte nada.
+const cruceSii = computed<FilaCruce[]>(() => {
+  const t = rcv.value?.totales
+  if (!t) return []
+  return [
+    { concepto: 'Ventas netas', folio360: mesActual.value?.ventas ?? 0, sii: t.ventasNeto + t.ventasExento },
+    { concepto: 'IVA débito', folio360: ivaMes.value.debito, sii: t.ivaDebito },
+    { concepto: 'Compras netas', folio360: mesActual.value?.compras ?? 0, sii: t.comprasNeto + t.comprasExento },
+    {
+      concepto: 'IVA crédito',
+      folio360: ivaMes.value.credito,
+      sii: t.ivaCredito,
+      nota: t.ivaUsoComun ? `el SII tiene además $${fm(t.ivaUsoComun)} de uso común sin prorratear` : undefined
+    }
+  ]
+})
+
+const hayDiferenciasSii = computed(() => cruceSii.value.some((f) => f.folio360 !== f.sii))
 
 function fm(valor: number): string {
   return valor.toLocaleString('es-CL')
@@ -166,6 +222,9 @@ onMounted(async () => {
   } finally {
     loading.value = false
   }
+  // Después del resumen (necesita el mes) y sin bloquear la página: el SII
+  // puede tardar o estar caído.
+  void cargarRcv()
 })
 </script>
 
@@ -225,6 +284,43 @@ onMounted(async () => {
           <span class="total-f29">Total estimado a pagar (F29): ${{ fm(totalF29) }}</span>
         </div>
       </div>
+
+      <section v-if="enProduccion" class="panel" :class="{ atenuado: rcvCargando }">
+        <div class="panel-cabecera">
+          <h2>Según el SII — Registro de Compras y Ventas de {{ mesActual ? nombreMesLargo(mesActual.mes).toLowerCase() : '' }}</h2>
+          <Button label="Actualizar" icon="pi pi-refresh" text size="small" :loading="rcvCargando" @click="cargarRcv" />
+        </div>
+        <p class="detalle">
+          Lo que el SII tiene registrado y con lo que arma la propuesta del F29, frente a lo registrado en Folio360.
+          Una diferencia significa que falta o sobra un documento, o que está en otro mes: el SII asigna las compras al mes en que las recibió.
+        </p>
+        <p v-if="rcvError" class="vacio">No se pudo consultar el SII: {{ rcvError }}</p>
+        <template v-else-if="rcv">
+          <table class="tabla-ranking">
+            <thead>
+              <tr><th>Concepto</th><th class="num">Folio360</th><th class="num">SII</th><th class="num">Diferencia</th></tr>
+            </thead>
+            <tbody>
+              <tr v-for="fila in cruceSii" :key="fila.concepto">
+                <td>{{ fila.concepto }}<span v-if="fila.nota" class="detalle"> · {{ fila.nota }}</span></td>
+                <td class="num">${{ fm(fila.folio360) }}</td>
+                <td class="num">${{ fm(fila.sii) }}</td>
+                <td class="num" :class="fila.folio360 === fila.sii ? 'sano' : 'alerta'">
+                  {{ fila.folio360 === fila.sii ? 'calza' : `$${fm(fila.folio360 - fila.sii)}` }}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <p class="detalle">
+            En el SII: {{ rcv.totales.documentosVentas }} documento(s) de venta y {{ rcv.totales.documentosCompras }} de compra en el registro.
+            <template v-if="rcv.totales.documentosComprasPendientes > 0">
+              Además {{ rcv.totales.documentosComprasPendientes }} compra(s) recibida(s) y aún pendiente(s) de aceptar, que todavía no entran a la propuesta.
+            </template>
+            <template v-if="!hayDiferenciasSii"> Todo calza con Folio360.</template>
+          </p>
+        </template>
+        <p v-else-if="rcvCargando" class="vacio">Consultando al SII…</p>
+      </section>
 
       <h2 class="grupo-titulo">Acumulado histórico (todo lo pendiente)</h2>
       <div class="tarjetas">
@@ -509,6 +605,9 @@ onMounted(async () => {
 .total-f29 { font-size: 0.85rem; font-weight: 700; margin-top: 0.35rem; padding-top: 0.35rem; border-top: 1px solid #e2e8f0; }
 .panel { background: #fff; border-radius: 10px; padding: 1.25rem; margin-bottom: 1rem; }
 .panel h2 { margin: 0 0 1rem; font-size: 1rem; }
+.panel-cabecera { display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
+.panel-cabecera h2 { margin: 0; }
+.panel .detalle { display: block; margin: 0.35rem 0 0.75rem; }
 .panel h3 { margin: 1.1rem 0 0.5rem; font-size: 0.85rem; color: #475569; }
 .grafico { display: flex; align-items: flex-end; gap: 0.6rem; height: 180px; }
 .columna { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 0.3rem; height: 100%; }

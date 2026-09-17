@@ -464,8 +464,64 @@ export interface Purchase {
   electronico?: boolean
   origen?: 'manual' | 'email' | 'rcv'
   siiAcuse?: PurchaseSiiAcuse
+  // Lo que el Registro de Compras del SII dice de esta compra (la "verdad
+  // del SII", la refresca la sincronización del RCV). Ver compras-sii.ts.
+  siiRcv?: PurchaseSiiRcv
+  // Forma de pago del DTE (1 contado, 2 crédito, 3 sin costo).
+  formaPago?: number
   createdAt: string
   updatedAt: string
+}
+
+export interface PurchaseSiiRcv {
+  periodo: string
+  seccion: 'PENDIENTE' | 'REGISTRO' | 'NO_INCLUIR' | 'RECLAMADO'
+  fechaRecepcionSii?: string
+  // 'A' = no reclamado en plazo (tácita), 'P' = contado, otro = evento
+  // explícito con su leyenda; ausente = sin evento todavía.
+  eventoReceptor?: string
+  eventoReceptorLeyenda?: string
+  fechaAcuse?: string
+  fechaReclamo?: string
+  // 1 Del Giro, 2 Supermercados, 3 Bienes raíces, 4 Activo fijo, 5 IVA uso
+  // común, 6 IVA no recuperable, 7 No corresponde incluir.
+  tipoTransaccion?: number
+  descTipoTransaccion?: string
+  actualizadoEn: string
+}
+
+// Resumen del RCV del SII para un mes (servicio rcv-resumen): lo que el SII
+// usa para proponer el F29.
+export interface RcvResumenRow {
+  tipoDte: number
+  nombreTipoDoc?: string
+  documentos: number
+  montoNeto: number
+  montoExento: number
+  montoIva: number
+  montoIvaNoRecuperable: number
+  montoIvaUsoComun: number
+  montoTotal: number
+}
+
+export interface RcvResumen {
+  periodo: string
+  ventas: RcvResumenRow[]
+  compras: RcvResumenRow[]
+  comprasPendientes: RcvResumenRow[]
+  totales: {
+    ventasNeto: number
+    ventasExento: number
+    ivaDebito: number
+    comprasNeto: number
+    comprasExento: number
+    ivaCredito: number
+    ivaUsoComun: number
+    ivaNoRecuperable: number
+    documentosVentas: number
+    documentosCompras: number
+    documentosComprasPendientes: number
+  }
 }
 
 // Config de la Casilla de Intercambio de DTE (ver server/src/email/casilla-intercambio.ts)
@@ -506,6 +562,9 @@ export interface IncomingInvoice {
   montoIva: number
   montoExento: number
   montoTotal: number
+  // Del XML (solo las de correo): vencimiento y forma de pago (1 contado).
+  fechaVencimiento?: string
+  formaPago?: number
   // 'rcv' = detectada en el Registro de Compras del SII (no llegó por
   // correo); ausente o 'email' = Casilla de Intercambio.
   origen?: 'email' | 'rcv'

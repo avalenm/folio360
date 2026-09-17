@@ -38,6 +38,7 @@ import {
   EXPLICACION_PLAZO_VENCIDO,
   EXPLICACION_SIN_REGISTRO_EN_SII
 } from '@/types'
+import { acuseSegunSii, discrepanciaClasificacion, estadoVencimiento, vencimientoDe } from '@/compras-sii'
 
 // La lista la pagina el SERVIDOR y los filtros viajan con la consulta: antes
 // se cargaban 100 compras y se filtraba sobre esas, así que buscar un folio
@@ -729,6 +730,17 @@ onMounted(async () => {
         <template #body="{ data }">{{ new Date(data.fecha).toLocaleDateString('es-CL') }}</template>
       </Column>
 
+      <!-- Antigüedad de la deuda por fila (Finanzas tiene el agregado). -->
+      <Column header="Vencimiento">
+        <template #body="{ data }">
+          <div v-if="estadoVencimiento(data)" class="stacked-cell">
+            <Tag :severity="estadoVencimiento(data)!.severity" :value="estadoVencimiento(data)!.value" :title="estadoVencimiento(data)!.title" />
+            <span v-if="saldoDe(data) > 0" class="muted">{{ vencimientoDe(data).toLocaleDateString('es-CL') }}</span>
+          </div>
+          <span v-else class="muted">—</span>
+        </template>
+      </Column>
+
       <Column header="Total">
         <template #body="{ data }">${{ data.montoTotal.toLocaleString('es-CL') }}</template>
       </Column>
@@ -748,11 +760,22 @@ onMounted(async () => {
 
       <Column header="Acuse SII">
         <template #body="{ data }">
+          <div class="stacked-cell">
+          <!-- Primero lo que el SII tiene registrado (siiRcv, lo traiga quien
+               lo traiga); solo si no hay dato del RCV se muestra lo que
+               Folio360 intentó (siiAcuse). -->
+          <Tag
+            v-if="acuseSegunSii(data)"
+            :severity="acuseSegunSii(data)!.severity"
+            :value="acuseSegunSii(data)!.value"
+            :icon="acuseSegunSii(data)!.icon"
+            :title="acuseSegunSii(data)!.title"
+          />
           <!-- Código 9: el SII no tiene el DTE. Antes se veía como "Aceptado"
                en rojo, que no dice nada; ahora dice qué pasa y que se está
                reintentando solo. -->
           <Tag
-            v-if="data.siiAcuse && acuseSinRegistroEnSii(data.siiAcuse)"
+            v-else-if="data.siiAcuse && acuseSinRegistroEnSii(data.siiAcuse)"
             severity="warn"
             icon="pi pi-clock"
             value="Sin registro en SII"
@@ -786,6 +809,16 @@ onMounted(async () => {
           />
           <span v-else-if="data.tipoDocumento === 'factura'" class="acuse-pendiente">Pendiente</span>
           <span v-else>—</span>
+          <!-- Clasificación tributaria del SII distinta del tratamiento de
+               IVA de acá: afecta el crédito que el SII propone en el F29. -->
+          <Tag
+            v-if="discrepanciaClasificacion(data)"
+            :severity="discrepanciaClasificacion(data)!.severity"
+            :value="discrepanciaClasificacion(data)!.value"
+            :icon="discrepanciaClasificacion(data)!.icon"
+            :title="discrepanciaClasificacion(data)!.title"
+          />
+          </div>
         </template>
       </Column>
 
