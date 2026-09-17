@@ -8,7 +8,7 @@ import { useToast } from 'primevue/usetoast'
 import { feathersClient } from '@/services/feathers'
 import { useAuthStore } from '@/stores/auth'
 import type { DteDocument, IncomingInvoice, Paginated, Purchase, Supplier } from '@/types'
-import { acuseSinRegistroEnSii, EXPLICACION_SIN_REGISTRO_EN_SII } from '@/types'
+import { acuseNoAplicaPorContado, acuseSinRegistroEnSii, EXPLICACION_DTE_CONTADO, EXPLICACION_SIN_REGISTRO_EN_SII } from '@/types'
 import { formatMonto, type ResumenCuentas } from '@/cuentas'
 
 const auth = useAuthStore()
@@ -160,6 +160,8 @@ function confirmRecepcionar(purchase: Purchase): void {
             detail: EXPLICACION_SIN_REGISTRO_EN_SII,
             life: 12000
           })
+        } else if (acuseNoAplicaPorContado(r)) {
+          toast.add({ severity: 'info', summary: 'Factura al contado: no lleva acuse', detail: EXPLICACION_DTE_CONTADO, life: 10000 })
         } else if (r.codResp !== 0) {
           toast.add({ severity: 'warn', summary: `El SII rechazó el acuse (código ${r.codResp})`, detail: r.descResp, life: 8000 })
         } else {

@@ -30,7 +30,12 @@ import type {
   PurchaseWrite,
   Supplier
 } from '@/types'
-import { acuseSinRegistroEnSii, EXPLICACION_SIN_REGISTRO_EN_SII } from '@/types'
+import {
+  acuseNoAplicaPorContado,
+  acuseSinRegistroEnSii,
+  EXPLICACION_DTE_CONTADO,
+  EXPLICACION_SIN_REGISTRO_EN_SII
+} from '@/types'
 
 // La lista la pagina el SERVIDOR y los filtros viajan con la consulta: antes
 // se cargaban 100 compras y se filtraba sobre esas, así que buscar un folio
@@ -566,6 +571,8 @@ function confirmAcuse(): void {
             detail: EXPLICACION_SIN_REGISTRO_EN_SII,
             life: 12000
           })
+        } else if (acuseNoAplicaPorContado(r)) {
+          toast.add({ severity: 'info', summary: 'Factura al contado: no lleva acuse', detail: EXPLICACION_DTE_CONTADO, life: 10000 })
         } else if (r.codResp !== 0) {
           toast.add({
             severity: 'warn',
@@ -735,6 +742,14 @@ onMounted(async () => {
             icon="pi pi-clock"
             value="Sin registro en SII"
             :title="tooltipSinRegistro(data.siiAcuse)"
+          />
+          <!-- Código 27: DTE al contado o gratuito — el SII no admite eventos
+               para esos, así que no es un rechazo ni algo pendiente. -->
+          <Tag
+            v-else-if="data.siiAcuse && acuseNoAplicaPorContado(data.siiAcuse)"
+            severity="secondary"
+            value="Contado, sin acuse"
+            :title="EXPLICACION_DTE_CONTADO"
           />
           <Tag
             v-else-if="data.siiAcuse && data.siiAcuse.codResp !== 0"

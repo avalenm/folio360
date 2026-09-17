@@ -17,7 +17,13 @@ import { useToast } from 'primevue/usetoast'
 import { useResource } from '@/composables/useResource'
 import { feathersClient } from '@/services/feathers'
 import type { IncomingInvoice, PurchaseAccionSii, SugerenciaOrdenCompra, Supplier } from '@/types'
-import { acuseSinRegistroEnSii, EXPLICACION_SIN_REGISTRO_EN_SII } from '@/types'
+import {
+  acuseNoAplicaPorContado,
+  acuseSinRegistroEnSii,
+  EXPLICACION_DTE_CONTADO,
+  EXPLICACION_SIN_REGISTRO_EN_SII,
+  TIPOS_DTE_CON_ACUSE
+} from '@/types'
 
 const { items: incoming, loading, fetchAll, remove } = useResource<IncomingInvoice>('incoming-invoices')
 const { items: suppliers, fetchAll: fetchSuppliers } = useResource<Supplier>('suppliers')
@@ -44,8 +50,8 @@ interface AccionMeta {
   icon: string
 }
 
-// El webservice de acuse/reclamo (Ley 19.983) solo entiende Factura
-// (tipoDoc SII 33) — ver la nota en confirm-incoming-invoice.service.ts. Son
+// El webservice de acuse/reclamo (Ley 19.983) entiende factura afecta (33)
+// y exenta (34) — TIPOS_DTE_CON_ACUSE, espejo del server. Son
 // acciones DIRECTAS: cada una manda su propia acción al SII y registra la
 // compra en el mismo paso, no un "Confirmar" genérico con una acción
 // opcional escondida adentro.
@@ -195,6 +201,13 @@ async function handleConfirm(): Promise<void> {
         detail: EXPLICACION_SIN_REGISTRO_EN_SII,
         life: 12000
       })
+    } else if (result.acuse && acuseNoAplicaPorContado(result.acuse)) {
+      toast.add({
+        severity: 'info',
+        summary: 'Compra registrada. Factura al contado: no lleva acuse',
+        detail: EXPLICACION_DTE_CONTADO,
+        life: 10000
+      })
     } else if (result.acuse && result.acuse.codResp !== 0) {
       toast.add({
         severity: 'warn',
@@ -258,7 +271,7 @@ const rowMenuItems = computed<MenuItem[]>(() => {
   // ofrece siempre en las 33 (sirve también para las pagadas al contado,
   // que no admiten eventos, o si el acuse ya se hizo en sii.cl).
   const items: MenuItem[] = []
-  if (invoice.tipoDte === 33) {
+  if (TIPOS_DTE_CON_ACUSE.includes(invoice.tipoDte)) {
     if (diasRestantesReclamo(invoice) > 0) {
       items.push(...accionesSii.map((a) => ({ label: a.label, icon: `pi ${a.icon}`, command: () => openConfirm(invoice, a.value) })))
     }
@@ -375,7 +388,7 @@ onMounted(async () => {
 
       <Column header="Plazo de reclamo">
         <template #body="{ data }">
-          <Tag v-if="data.tipoDte === 33" :severity="plazoTag(data).severity" :value="plazoTag(data).value" />
+          <Tag v-if="TIPOS_DTE_CON_ACUSE.includes(data.tipoDte)" :severity="plazoTag(data).severity" :value="plazoTag(data).value" />
           <span v-else class="muted">No aplica</span>
         </template>
       </Column>

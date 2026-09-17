@@ -376,9 +376,26 @@ export interface PurchaseSiiAcuse {
 // COD_RESP_SIN_REGISTRO_EN_SII en server/services/purchases/registrar-acuse.ts.
 export const COD_RESP_SIN_REGISTRO_EN_SII = 9
 
+// Tipos de DTE con acuse/reclamo ante el SII: factura afecta y exenta.
+// Espejo de TIPOS_DTE_CON_ACUSE del server.
+export const TIPOS_DTE_CON_ACUSE: readonly number[] = [33, 34]
+
 export function acuseSinRegistroEnSii(acuse: { codResp: number } | undefined | null): boolean {
   return acuse?.codResp === COD_RESP_SIN_REGISTRO_EN_SII
 }
+
+// codResp 27: "No se puede registrar un evento ... de un DTE pagado al
+// contado o gratuito". Para esos DTE la Ley 19.983 no contempla acuse ni
+// reclamo y el SII rechaza cualquier acción, siempre. No es un error: no hay
+// nada que hacer ante el SII. Espejo de COD_RESP_DTE_CONTADO_SIN_EVENTOS.
+export const COD_RESP_DTE_CONTADO_SIN_EVENTOS = 27
+
+export function acuseNoAplicaPorContado(acuse: { codResp: number } | undefined | null): boolean {
+  return acuse?.codResp === COD_RESP_DTE_CONTADO_SIN_EVENTOS
+}
+
+export const EXPLICACION_DTE_CONTADO =
+  'Esta factura viene marcada como pagada al contado (o gratuita). Para esos documentos la ley no contempla acuse ni reclamo, y el SII rechaza cualquier acción. La compra queda registrada y no hay nada más que hacer ante el SII.'
 
 // Texto único para explicar el codResp 9 en cualquier pantalla.
 export const EXPLICACION_SIN_REGISTRO_EN_SII =
@@ -407,6 +424,8 @@ export interface Purchase {
   _id: string
   supplierId: string
   tipoDocumento: PurchaseTipoDocumento
+  // Tipo SII exacto (33/34/56/61) cuando la compra vino de un DTE recibido.
+  tipoDte?: number
   folio: string
   fecha: string
   fechaVencimiento?: string
@@ -431,7 +450,7 @@ export interface Purchase {
   // Decide si el documento va al Libro de Compras con su código electrónico
   // (33) o manual (30). Ausente = electrónico.
   electronico?: boolean
-  origen?: 'manual' | 'email'
+  origen?: 'manual' | 'email' | 'rcv'
   siiAcuse?: PurchaseSiiAcuse
   createdAt: string
   updatedAt: string
