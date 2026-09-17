@@ -132,12 +132,16 @@ const rcvCargando = ref(false)
 const rcvError = ref<string | null>(null)
 const enProduccion = computed(() => auth.currentOrganization?.ambiente === 'produccion')
 
-async function cargarRcv(): Promise<void> {
+// `refrescar` salta la caché del server (botón Actualizar); la carga
+// automática la aprovecha para no golpear al SII en cada cambio de mes.
+async function cargarRcv(refrescar = false): Promise<void> {
   if (!enProduccion.value || !mesActual.value) return
   rcvCargando.value = true
   rcvError.value = null
   try {
-    rcv.value = (await feathersClient.service('rcv-resumen').find({ query: { mes: mesActual.value.mes } })) as RcvResumen
+    rcv.value = (await feathersClient
+      .service('rcv-resumen')
+      .find({ query: { mes: mesActual.value.mes, ...(refrescar ? { refrescar: '1' } : {}) } })) as RcvResumen
   } catch (e) {
     rcv.value = null
     rcvError.value = e instanceof Error ? e.message : 'No se pudo consultar el SII'
@@ -307,7 +311,7 @@ onMounted(async () => {
       <section v-if="enProduccion" class="panel" :class="{ atenuado: rcvCargando }">
         <div class="panel-cabecera">
           <h2>Según el SII — Registro de Compras y Ventas de {{ mesActual ? nombreMesLargo(mesActual.mes).toLowerCase() : '' }}</h2>
-          <Button label="Actualizar" icon="pi pi-refresh" text size="small" :loading="rcvCargando" @click="cargarRcv" />
+          <Button label="Actualizar" icon="pi pi-refresh" text size="small" :loading="rcvCargando" @click="cargarRcv(true)" />
         </div>
         <p class="detalle">
           Lo que el SII tiene registrado y con lo que arma la propuesta del F29, frente a lo registrado en Folio360.
