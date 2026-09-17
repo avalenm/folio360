@@ -76,6 +76,17 @@ const toast = useToast()
 // documento no se llame distinto según la pantalla.
 const tipoDocumentoLabel = NOMBRE_TIPO_COMPRA
 
+// Nombre del documento distinguiendo la factura exenta (tipo SII 34) de la
+// afecta (33), como lo muestra el RCV. Las compras de hoy en adelante traen
+// tipoDte desde el XML; las anteriores y las manuales se infieren por los
+// montos, igual que hace el server para el acuse (tipoDteDeCompra): una
+// factura sin neto ni IVA y con exento solo puede ser exenta.
+function nombreDocumento(p: Purchase): string {
+  if (p.tipoDocumento !== 'factura') return tipoDocumentoLabel[p.tipoDocumento]
+  const exenta = p.tipoDte === 34 || (p.tipoDte === undefined && p.montoNeto === 0 && p.montoIva === 0 && p.montoExento > 0)
+  return exenta ? 'Factura exenta' : 'Factura'
+}
+
 const tiposDocumento: { label: string; value: PurchaseTipoDocumento }[] = (
   Object.entries(NOMBRE_TIPO_COMPRA) as [PurchaseTipoDocumento, string][]
 ).map(([value, label]) => ({ label, value }))
@@ -367,7 +378,7 @@ const referenciaOptions = computed(() =>
         (p.tipoDocumento === 'factura' || p.tipoDocumento === 'factura_compra')
     )
     .map((p) => ({
-      label: `${tipoDocumentoLabel[p.tipoDocumento]} ${p.folio} — $${p.montoTotal.toLocaleString('es-CL')}`,
+      label: `${nombreDocumento(p)} ${p.folio} — $${p.montoTotal.toLocaleString('es-CL')}`,
       value: p._id
     }))
 )
@@ -709,7 +720,7 @@ onMounted(async () => {
         <template #body="{ data }">
           <div class="stacked-cell">
             <strong>{{ data.folio }}</strong>
-            <span class="muted">{{ tipoDocumentoLabel[data.tipoDocumento as PurchaseTipoDocumento] }}</span>
+            <span class="muted">{{ nombreDocumento(data) }}</span>
           </div>
         </template>
       </Column>
