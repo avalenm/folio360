@@ -322,14 +322,21 @@ function plazoTag(invoice: IncomingInvoice): { severity: string; value: string }
   return { severity: 'info', value: `${dias} días para reclamar` }
 }
 
-// --- Sincronización manual del RCV ---
+// --- Sincronización del RCV ---
+// Corre automáticamente al abrir la bandeja (ver onMounted) y también a mano
+// con el botón "Buscar en el RCV", que queda de respaldo. El modo automático
+// es silencioso: no avisa "nada nuevo" ni los errores del SII en cada carga —
+// para eso están el botón (acción explícita) y el poller horario del worker.
 const syncingRcv = ref(false)
 
-async function buscarEnRcv(): Promise<void> {
+async function buscarEnRcv({ auto = false }: { auto?: boolean } = {}): Promise<void> {
   syncingRcv.value = true
   try {
     const result = await feathersClient.service('rcv-sync').create({})
     await fetchAll()
+    // En automático solo avisamos cuando de verdad apareció o cambió algo; si
+    // no, callamos para no poner un toast en cada vez que se abre la página.
+    if (auto && result.nuevas === 0 && result.actualizadas === 0) return
     toast.add({
       severity: result.nuevas > 0 ? 'info' : 'success',
       summary:
@@ -340,6 +347,12 @@ async function buscarEnRcv(): Promise<void> {
       life: 4000
     })
   } catch (e) {
+    // El SII se cae a ratos (timeouts hacia palena/www4): en automático no
+    // molestamos con un error en cada carga — el worker y el botón lo cubren.
+    if (auto) {
+      console.warn('Sincronización automática del RCV falló:', e)
+      return
+    }
     toast.add({
       severity: 'error',
       summary: 'Error al consultar el RCV',
@@ -352,7 +365,11 @@ async function buscarEnRcv(): Promise<void> {
 }
 
 onMounted(async () => {
+  // Primero mostramos lo que ya está en la BD (rápido); luego, en segundo
+  // plano, consultamos el RCV del SII para traer las facturas que el proveedor
+  // no mandó por correo, sin que el usuario tenga que apretar nada.
   await Promise.all([fetchAll(), fetchSuppliers()])
+  void buscarEnRcv({ auto: true })
 })
 </script>
 
@@ -360,7 +377,7 @@ onMounted(async () => {
   <div>
     <div class="page-header">
       <h1 class="page-title">Facturas recibidas <AyudaPagina titulo="Facturas recibidas" :secciones="AYUDA_FACTURAS_RECIBIDAS" /></h1>
-      <Button label="Buscar en el RCV" icon="pi pi-sync" outlined :loading="syncingRcv" @click="buscarEnRcv" />
+      <Button label="Buscar en el RCV" icon="pi pi-sync" outlined :loading="syncingRcv" @click="buscarEnRcv()" />
     </div>
 
     <p class="page-hint">
